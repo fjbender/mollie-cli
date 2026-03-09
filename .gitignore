@@ -1,0 +1,41 @@
+# Binaries
+mollie-cli
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binaries
+*.test
+
+# Test & coverage output
+*.out
+coverage.html
+
+# Go workspace (local only)
+go.work
+go.work.sum
+
+# Dependency vendoring (remove if you commit vendor/)
+vendor/
+
+# Build output
+dist/
+build/
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~

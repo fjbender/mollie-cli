@@ -1,0 +1,457 @@
+package cmd
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"strconv"
+
+	"github.com/fjbender/mollie-cli/internal/mollieclient"
+	"github.com/fjbender/mollie-cli/internal/output"
+	"github.com/mollie/mollie-api-golang/models/components"
+	"github.com/spf13/cobra"
+)
+
+// ── flag value holders ───────────────────────────────────────────────────────
+
+var (
+	// create flags
+	sessCreateAmount       string
+	sessCreateCurrency     string
+	sessCreateDescription  string
+	sessCreateRedirectURL  string
+	sessCreateWebhookURL   string
+	sessCreateCustomerID   string
+	sessCreateSequenceType string
+	sessCreateMetadata     string
+
+	// --with-lines flags
+	sessCreateWithLines     bool
+	sessCreateLinesVatRate  string
+	sessCreateLinesShipping string
+
+	// --with-billing flags
+	sessCreateWithBilling       bool
+	sessCreateBillingGivenName  string
+	sessCreateBillingFamilyName string
+	sessCreateBillingEmail      string
+	sessCreateBillingPhone      string
+	sessCreateBillingOrg        string
+	sessCreateBillingStreet     string
+	sessCreateBillingStreetAdl  string
+	sessCreateBillingPostalCode string
+	sessCreateBillingCity       string
+	sessCreateBillingRegion     string
+	sessCreateBillingCountry    string
+
+	// --with-shipping flags
+	sessCreateWithShipping       bool
+	sessCreateShippingGivenName  string
+	sessCreateShippingFamilyName string
+	sessCreateShippingEmail      string
+	sessCreateShippingPhone      string
+	sessCreateShippingOrg        string
+	sessCreateShippingStreet     string
+	sessCreateShippingStreetAdl  string
+	sessCreateShippingPostalCode string
+	sessCreateShippingCity       string
+	sessCreateShippingRegion     string
+	sessCreateShippingCountry    string
+)
+
+// ── command tree ─────────────────────────────────────────────────────────────
+
+var sessionsCmd = &cobra.Command{
+	Use:   "sessions",
+	Short: "Manage Mollie sessions (beta)",
+	Long: `Create and inspect Mollie sessions for checkout flows built with Mollie Components.
+
+Note: Sessions is a beta feature. The API specification may still change.`,
+}
+
+var sessionsCreateCmd = &cobra.Command{
+	Use:         "create",
+	Short:       "Create a new session",
+	RunE:        runSessionsCreate,
+	Annotations: map[string]string{"usesDefaults": "true"},
+}
+
+var sessionsGetCmd = &cobra.Command{
+	Use:   "get <session-id>",
+	Short: "Get a single session",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runSessionsGet,
+}
+
+func init() {
+	// create flags
+	sessionsCreateCmd.Flags().StringVar(&sessCreateAmount, "amount", "", "Session amount, e.g. 10.00 (required; falls back to `defaults set --amount`)")
+	sessionsCreateCmd.Flags().StringVar(&sessCreateCurrency, "currency", "", "ISO 4217 currency code, e.g. EUR (required; falls back to `defaults set --currency`)")
+	sessionsCreateCmd.Flags().StringVar(&sessCreateDescription, "description", "", "Session description shown to the customer (required; falls back to `defaults set --description`)")
+	sessionsCreateCmd.Flags().StringVar(&sessCreateRedirectURL, "redirect-url", "", "URL to redirect the customer to after payment (required; falls back to `defaults set --redirect-url`)")
+	sessionsCreateCmd.Flags().StringVar(&sessCreateWebhookURL, "webhook-url", "", "Webhook URL for payment status updates, passed under the payment property (falls back to `defaults set --webhook-url`)")
+	sessionsCreateCmd.Flags().StringVar(&sessCreateCustomerID, "customer-id", "", "Link this session to a Customer ID")
+	sessionsCreateCmd.Flags().StringVar(&sessCreateSequenceType, "sequence-type", "", "Sequence type: oneoff or first")
+	sessionsCreateCmd.Flags().StringVar(&sessCreateMetadata, "metadata", "", "Arbitrary JSON object metadata to attach to the session")
+
+	// --with-lines flags
+	sessionsCreateCmd.Flags().BoolVar(&sessCreateWithLines, "with-lines", false, "Auto-generate order lines summing to --amount")
+	sessionsCreateCmd.Flags().StringVar(&sessCreateLinesVatRate, "lines-vat-rate", "0.00", "VAT rate for generated lines, e.g. 21.00 (default 0.00)")
+	sessionsCreateCmd.Flags().StringVar(&sessCreateLinesShipping, "lines-shipping-amount", "", "Split a shipping line off the total (e.g. 4.99); must be smaller than --amount")
+
+	// --with-billing flags
+	sessionsCreateCmd.Flags().BoolVar(&sessCreateWithBilling, "with-billing", false, "Add a default billing address (NL test address); override individual fields with --billing-* flags")
+	sessionsCreateCmd.Flags().StringVar(&sessCreateBillingGivenName, "billing-given-name", "", "Billing given name")
+	sessionsCreateCmd.Flags().StringVar(&sessCreateBillingFamilyName, "billing-family-name", "", "Billing family name")
+	sessionsCreateCmd.Flags().StringVar(&sessCreateBillingEmail, "billing-email", "", "Billing e-mail address")
+	sessionsCreateCmd.Flags().StringVar(&sessCreateBillingPhone, "billing-phone", "", "Billing phone number (E.164)")
+	sessionsCreateCmd.Flags().StringVar(&sessCreateBillingOrg, "billing-org", "", "Billing organisation name")
+	sessionsCreateCmd.Flags().StringVar(&sessCreateBillingStreet, "billing-street", "", "Billing street and number")
+	sessionsCreateCmd.Flags().StringVar(&sessCreateBillingStreetAdl, "billing-street-additional", "", "Billing street additional info")
+	sessionsCreateCmd.Flags().StringVar(&sessCreateBillingPostalCode, "billing-postal-code", "", "Billing postal code")
+	sessionsCreateCmd.Flags().StringVar(&sessCreateBillingCity, "billing-city", "", "Billing city")
+	sessionsCreateCmd.Flags().StringVar(&sessCreateBillingRegion, "billing-region", "", "Billing region / state")
+	sessionsCreateCmd.Flags().StringVar(&sessCreateBillingCountry, "billing-country", "", "Billing ISO 3166-1 alpha-2 country code")
+
+	// --with-shipping flags
+	sessionsCreateCmd.Flags().BoolVar(&sessCreateWithShipping, "with-shipping", false, "Add a default shipping address (NL test address); override individual fields with --shipping-* flags")
+	sessionsCreateCmd.Flags().StringVar(&sessCreateShippingGivenName, "shipping-given-name", "", "Shipping given name")
+	sessionsCreateCmd.Flags().StringVar(&sessCreateShippingFamilyName, "shipping-family-name", "", "Shipping family name")
+	sessionsCreateCmd.Flags().StringVar(&sessCreateShippingEmail, "shipping-email", "", "Shipping e-mail address")
+	sessionsCreateCmd.Flags().StringVar(&sessCreateShippingPhone, "shipping-phone", "", "Shipping phone number (E.164)")
+	sessionsCreateCmd.Flags().StringVar(&sessCreateShippingOrg, "shipping-org", "", "Shipping organisation name")
+	sessionsCreateCmd.Flags().StringVar(&sessCreateShippingStreet, "shipping-street", "", "Shipping street and number")
+	sessionsCreateCmd.Flags().StringVar(&sessCreateShippingStreetAdl, "shipping-street-additional", "", "Shipping street additional info")
+	sessionsCreateCmd.Flags().StringVar(&sessCreateShippingPostalCode, "shipping-postal-code", "", "Shipping postal code")
+	sessionsCreateCmd.Flags().StringVar(&sessCreateShippingCity, "shipping-city", "", "Shipping city")
+	sessionsCreateCmd.Flags().StringVar(&sessCreateShippingRegion, "shipping-region", "", "Shipping region / state")
+	sessionsCreateCmd.Flags().StringVar(&sessCreateShippingCountry, "shipping-country", "", "Shipping ISO 3166-1 alpha-2 country code")
+
+	sessionsCmd.AddCommand(sessionsCreateCmd)
+	sessionsCmd.AddCommand(sessionsGetCmd)
+	rootCmd.AddCommand(sessionsCmd)
+}
+
+// ── handlers ─────────────────────────────────────────────────────────────────
+
+func runSessionsCreate(cmd *cobra.Command, _ []string) error {
+	applyCreateDefaults(cmd,
+		&sessCreateDescription, &sessCreateAmount, &sessCreateCurrency,
+		&sessCreateRedirectURL, &sessCreateWebhookURL,
+	)
+
+	switch {
+	case sessCreateAmount == "":
+		return fmt.Errorf("required flag \"amount\" not set and no default configured (run `mollie defaults set`)")
+	case sessCreateCurrency == "":
+		return fmt.Errorf("required flag \"currency\" not set and no default configured (run `mollie defaults set`)")
+	case sessCreateDescription == "":
+		return fmt.Errorf("required flag \"description\" not set and no default configured (run `mollie defaults set`)")
+	case sessCreateRedirectURL == "":
+		return fmt.Errorf("required flag \"redirect-url\" not set and no default configured (run `mollie defaults set`)")
+	}
+
+	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile)
+	if err != nil {
+		return err
+	}
+
+	req := &components.SessionRequest{
+		Amount: components.Amount{
+			Currency: sessCreateCurrency,
+			Value:    sessCreateAmount,
+		},
+		Description: sessCreateDescription,
+		RedirectURL: sessCreateRedirectURL,
+	}
+
+	// The webhook URL is passed under the payment property for sessions.
+	if sessCreateWebhookURL != "" {
+		req.Payment = &components.SessionRequestPayment{WebhookURL: &sessCreateWebhookURL}
+	}
+
+	if sessCreateCustomerID != "" {
+		req.CustomerID = &sessCreateCustomerID
+	}
+	if sessCreateSequenceType != "" {
+		st := components.SessionSequenceType(sessCreateSequenceType)
+		req.SequenceType = &st
+	}
+	if sessCreateMetadata != "" {
+		meta, err := parseSessionMetadata(sessCreateMetadata)
+		if err != nil {
+			return fmt.Errorf("invalid --metadata: %w", err)
+		}
+		req.Metadata = meta
+	}
+	if sessCreateWithLines {
+		lines, err := buildSessionLines(
+			sessCreateCurrency, sessCreateAmount,
+			sessCreateDescription, sessCreateLinesVatRate, sessCreateLinesShipping,
+		)
+		if err != nil {
+			return err
+		}
+		req.Lines = lines
+	}
+	if sessCreateWithBilling {
+		req.BillingAddress = buildSessionBillingAddress()
+	}
+	if sessCreateWithShipping {
+		req.ShippingAddress = buildSessionShippingAddress()
+	}
+
+	resp, err := client.Sessions.Create(context.Background(), nil, req)
+	if err != nil {
+		return fmt.Errorf("creating session: %w", err)
+	}
+	sess := resp.GetSessionResponse()
+	if sess == nil {
+		return fmt.Errorf("unexpected empty response from API")
+	}
+
+	switch resolvedOutput() {
+	case output.FormatJSON:
+		return output.PrintJSON(sess)
+	default:
+		output.PrintTable(
+			[]string{"ID", "STATUS", "AMOUNT", "DESCRIPTION", "CLIENT ACCESS TOKEN"},
+			[][]string{{
+				sess.GetID(),
+				string(sess.GetStatus()),
+				formatAmount(sess.GetAmount()),
+				sess.GetDescription(),
+				sess.GetClientAccessToken(),
+			}},
+			!flagLive,
+		)
+	}
+	return nil
+}
+
+func runSessionsGet(_ *cobra.Command, args []string) error {
+	// Sessions are bound to a profile and mode at creation time; the GET
+	// endpoint does not accept profileId or testmode. Use the auth-only client
+	// that deliberately omits both parameters.
+	client, err := mollieclient.NewOrganizationClient(cfg, flagAPIKey)
+	if err != nil {
+		return err
+	}
+
+	resp, err := client.Sessions.Get(context.Background(), args[0], nil)
+	if err != nil {
+		return fmt.Errorf("getting session: %w", err)
+	}
+	sess := resp.GetSessionResponse()
+	if sess == nil {
+		return fmt.Errorf("session not found")
+	}
+
+	switch resolvedOutput() {
+	case output.FormatJSON:
+		return output.PrintJSON(sess)
+	default:
+		output.PrintTable(
+			[]string{"FIELD", "VALUE"},
+			sessionDetailRows(sess),
+			!flagLive,
+		)
+	}
+	return nil
+}
+
+// ── helpers ───────────────────────────────────────────────────────────────────
+
+func sessionDetailRows(s *components.SessionResponse) [][]string {
+	row := func(k, v string) []string { return []string{k, v} }
+
+	seqType := "—"
+	if st := s.GetSequenceType(); st != nil {
+		seqType = string(*st)
+	}
+
+	webhookURL := "—"
+	if p := s.GetPayment(); p != nil {
+		webhookURL = derefOpt(p.GetWebhookURL())
+	}
+
+	metaStr := "—"
+	if m := s.GetMetadata(); m != nil {
+		if b, err := json.Marshal(m); err == nil {
+			metaStr = string(b)
+		}
+	}
+
+	return [][]string{
+		// Identity
+		row("ID", s.GetID()),
+		row("Mode", string(s.GetMode())),
+		row("Status", string(s.GetStatus())),
+		// Financials
+		row("Amount", formatAmount(s.GetAmount())),
+		// Details
+		row("Description", s.GetDescription()),
+		row("Redirect URL", s.GetRedirectURL()),
+		row("Webhook URL", webhookURL),
+		row("Sequence Type", seqType),
+		// References
+		row("Customer ID", derefOpt(s.GetCustomerID())),
+		row("Profile ID", s.GetProfileID()),
+		// Access
+		row("Client Access Token", s.GetClientAccessToken()),
+		// Timestamps
+		row("Created At", s.GetCreatedAt()),
+		// Metadata (last — can be long)
+		row("Metadata", metaStr),
+	}
+}
+
+// buildSessionBillingAddress builds a PaymentAddress for session billing
+// using the same NL test-mode defaults as the payments command.
+func buildSessionBillingAddress() *components.PaymentAddress {
+	addr := &components.PaymentAddress{
+		GivenName:       overrideOrDefault(defaultAddrGivenName, sessCreateBillingGivenName),
+		FamilyName:      overrideOrDefault(defaultAddrFamilyName, sessCreateBillingFamilyName),
+		Email:           overrideOrDefault(defaultAddrEmail, sessCreateBillingEmail),
+		StreetAndNumber: overrideOrDefault(defaultAddrStreet, sessCreateBillingStreet),
+		PostalCode:      overrideOrDefault(defaultAddrPostalCode, sessCreateBillingPostalCode),
+		City:            overrideOrDefault(defaultAddrCity, sessCreateBillingCity),
+		Country:         overrideOrDefault(defaultAddrCountry, sessCreateBillingCountry),
+	}
+	if sessCreateBillingPhone != "" {
+		addr.Phone = strPtr(sessCreateBillingPhone)
+	}
+	if sessCreateBillingOrg != "" {
+		addr.OrganizationName = strPtr(sessCreateBillingOrg)
+	}
+	if sessCreateBillingStreetAdl != "" {
+		addr.StreetAdditional = strPtr(sessCreateBillingStreetAdl)
+	}
+	if sessCreateBillingRegion != "" {
+		addr.Region = strPtr(sessCreateBillingRegion)
+	}
+	return addr
+}
+
+// buildSessionShippingAddress builds a PaymentAddress for session shipping
+// using the same NL test-mode defaults as the payments command.
+func buildSessionShippingAddress() *components.PaymentAddress {
+	addr := &components.PaymentAddress{
+		GivenName:       overrideOrDefault(defaultAddrGivenName, sessCreateShippingGivenName),
+		FamilyName:      overrideOrDefault(defaultAddrFamilyName, sessCreateShippingFamilyName),
+		Email:           overrideOrDefault(defaultAddrEmail, sessCreateShippingEmail),
+		StreetAndNumber: overrideOrDefault(defaultAddrStreet, sessCreateShippingStreet),
+		PostalCode:      overrideOrDefault(defaultAddrPostalCode, sessCreateShippingPostalCode),
+		City:            overrideOrDefault(defaultAddrCity, sessCreateShippingCity),
+		Country:         overrideOrDefault(defaultAddrCountry, sessCreateShippingCountry),
+	}
+	if sessCreateShippingPhone != "" {
+		addr.Phone = strPtr(sessCreateShippingPhone)
+	}
+	if sessCreateShippingOrg != "" {
+		addr.OrganizationName = strPtr(sessCreateShippingOrg)
+	}
+	if sessCreateShippingStreetAdl != "" {
+		addr.StreetAdditional = strPtr(sessCreateShippingStreetAdl)
+	}
+	if sessCreateShippingRegion != "" {
+		addr.Region = strPtr(sessCreateShippingRegion)
+	}
+	return addr
+}
+
+// buildSessionLines auto-generates []SessionLineItem values that sum to the
+// session's total amount. It mirrors buildPaymentLines but uses the
+// SessionLineItem type (which takes PaymentLineTypeResponse for its Type field).
+//
+// Parameters:
+//   - currency:    ISO 4217 code, e.g. "EUR"
+//   - totalStr:    session amount string, e.g. "15.00"
+//   - description: used as the description for the product line
+//   - vatRateStr:  VAT rate, e.g. "21.00" ("0.00" → no VAT)
+//   - shippingStr: when non-empty, a shipping line is split off the total;
+//     must be less than totalStr
+func buildSessionLines(
+	currency, totalStr, description, vatRateStr, shippingStr string,
+) ([]components.SessionLineItem, error) {
+	total, err := strconv.ParseFloat(totalStr, 64)
+	if err != nil {
+		return nil, fmt.Errorf("cannot parse --amount %q: %w", totalStr, err)
+	}
+	vatRate, err := strconv.ParseFloat(vatRateStr, 64)
+	if err != nil {
+		return nil, fmt.Errorf("cannot parse --lines-vat-rate %q: %w", vatRateStr, err)
+	}
+	shipping := 0.0
+	if shippingStr != "" {
+		shipping, err = strconv.ParseFloat(shippingStr, 64)
+		if err != nil {
+			return nil, fmt.Errorf("cannot parse --lines-shipping-amount %q: %w", shippingStr, err)
+		}
+		if shipping <= 0 {
+			return nil, fmt.Errorf("--lines-shipping-amount must be > 0")
+		}
+		if shipping >= total {
+			return nil, fmt.Errorf("--lines-shipping-amount (%s) must be less than --amount (%s)", shippingStr, totalStr)
+		}
+	}
+
+	amountOf := func(v float64) components.Amount {
+		return components.Amount{Currency: currency, Value: fmt.Sprintf("%.2f", v)}
+	}
+
+	vatAmountOf := func(lineTotal float64) *components.Amount {
+		if vatRate == 0 {
+			return nil
+		}
+		v := lineTotal * vatRate / (100 + vatRate)
+		a := amountOf(v)
+		return &a
+	}
+
+	var vatRateStrPtr *string
+	if vatRate != 0 {
+		formatted := fmt.Sprintf("%.2f", vatRate)
+		vatRateStrPtr = &formatted
+	}
+
+	physType := components.PaymentLineTypeResponsePhysical
+	quantity := int64(1)
+
+	productTotal := total - shipping
+	productLine := components.SessionLineItem{
+		Type:        &physType,
+		Description: description,
+		Quantity:    quantity,
+		UnitPrice:   amountOf(productTotal),
+		TotalAmount: amountOf(productTotal),
+		VatRate:     vatRateStrPtr,
+		VatAmount:   vatAmountOf(productTotal),
+	}
+
+	if shipping == 0 {
+		return []components.SessionLineItem{productLine}, nil
+	}
+
+	shippingType := components.PaymentLineTypeResponseShippingFee
+	shippingLine := components.SessionLineItem{
+		Type:        &shippingType,
+		Description: "Shipping",
+		Quantity:    quantity,
+		UnitPrice:   amountOf(shipping),
+		TotalAmount: amountOf(shipping),
+		VatRate:     vatRateStrPtr,
+		VatAmount:   vatAmountOf(shipping),
+	}
+
+	return []components.SessionLineItem{productLine, shippingLine}, nil
+}
+
+// parseSessionMetadata unmarshals a JSON object string into map[string]any.
+func parseSessionMetadata(raw string) (map[string]any, error) {
+	var m map[string]any
+	if err := json.Unmarshal([]byte(raw), &m); err != nil {
+		return nil, fmt.Errorf("must be a valid JSON object: %w", err)
+	}
+	return m, nil
+}
