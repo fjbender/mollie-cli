@@ -43,6 +43,9 @@ var (
 	// cancel flag
 	payConfirm bool
 
+	// capture mode flag
+	payCreateCaptureMode string
+
 	// --with-lines flags
 	payCreateWithLines     bool
 	payCreateLinesVatRate  string
@@ -129,6 +132,7 @@ func init() {
 	paymentsCreateCmd.Flags().StringVar(&payCreateSequenceType, "sequence-type", "", "Sequence type: oneoff, first, or recurring")
 	paymentsCreateCmd.Flags().StringVar(&payCreateWebhookURL, "webhook-url", "", "Webhook URL for payment status updates (falls back to `defaults set --webhook-url`)")
 	paymentsCreateCmd.Flags().StringVar(&payCreateMetadata, "metadata", "", "Arbitrary JSON metadata to attach to the payment")
+	paymentsCreateCmd.Flags().StringVar(&payCreateCaptureMode, "capture-mode", "", "Capture mode: automatic or manual")
 
 	// --with-lines flags
 	paymentsCreateCmd.Flags().BoolVar(&payCreateWithLines, "with-lines", false, "Auto-generate order lines summing to --amount")
@@ -232,6 +236,10 @@ func runPaymentsCreate(cmd *cobra.Command, _ []string) error {
 		me := components.MethodEnum(payCreateMethod)
 		m := components.CreateMethodMethodEnum(me)
 		req.Method = &m
+	}
+	if payCreateCaptureMode != "" {
+		cm := components.CaptureMode(payCreateCaptureMode)
+		req.CaptureMode = &cm
 	}
 	if payCreateMetadata != "" {
 		meta, err := parseMetadata(payCreateMetadata)
