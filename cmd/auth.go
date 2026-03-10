@@ -65,9 +65,10 @@ func runAuthSetup(_ *cobra.Command, _ []string) error {
 	fmt.Println("Validating token …")
 
 	// Validate the token by hitting GET /v2/organizations/me.
-	// We always use test mode here so live data is never accidentally touched.
+	// Organizations/me and Profiles/list only work in live mode, so we use
+	// NewOrganizationClient which omits WithTestmode entirely.
 	tmpCfg := &config.Config{APIKey: apiKey}
-	client, err := mollieclient.New(tmpCfg, "", false, "")
+	client, err := mollieclient.NewOrganizationClient(tmpCfg, "")
 	if err != nil {
 		return err
 	}
