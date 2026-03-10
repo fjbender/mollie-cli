@@ -43,8 +43,8 @@ func (c *Config) IsConfigured() bool {
 	return c.APIKey != ""
 }
 
-// ConfigDir returns the directory that holds the config file, respecting XDG.
-func ConfigDir() (string, error) {
+// Dir returns the directory that holds the config file, respecting XDG.
+func Dir() (string, error) {
 	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
 		return filepath.Join(xdg, "mollie-cli"), nil
 	}
@@ -55,9 +55,9 @@ func ConfigDir() (string, error) {
 	return filepath.Join(home, ".config", "mollie-cli"), nil
 }
 
-// ConfigPath returns the full path to config.toml.
-func ConfigPath() (string, error) {
-	dir, err := ConfigDir()
+// Path returns the full path to config.toml.
+func Path() (string, error) {
+	dir, err := Dir()
 	if err != nil {
 		return "", err
 	}
@@ -81,7 +81,7 @@ func Load() (*Config, error) {
 	v.BindEnv(KeyAPIKey, "MOLLIE_API_KEY")     //nolint:errcheck
 	v.BindEnv(KeyLiveMode, "MOLLIE_LIVE_MODE") //nolint:errcheck
 
-	dir, err := ConfigDir()
+	dir, err := Dir()
 	if err != nil {
 		return nil, err
 	}
@@ -102,7 +102,7 @@ func Load() (*Config, error) {
 
 // Save writes cfg to disk at the canonical path with mode 0600.
 func Save(cfg *Config) error {
-	dir, err := ConfigDir()
+	dir, err := Dir()
 	if err != nil {
 		return err
 	}
@@ -110,7 +110,7 @@ func Save(cfg *Config) error {
 		return fmt.Errorf("creating config directory: %w", err)
 	}
 
-	path, err := ConfigPath()
+	path, err := Path()
 	if err != nil {
 		return err
 	}

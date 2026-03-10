@@ -24,7 +24,7 @@ func APIKey() (string, error) {
 			huh.NewInput().
 				Title("Mollie Organization Access Token").
 				Description("Paste your token (format: access_*)").
-				Password(true).
+				EchoMode(huh.EchoModePassword).
 				Validate(func(s string) error {
 					s = strings.TrimSpace(s)
 					if !strings.HasPrefix(s, "access_") || len(s) < 15 {

@@ -101,7 +101,7 @@ func runAuthSetup(_ *cobra.Command, _ []string) error {
 		return fmt.Errorf("saving config: %w", err)
 	}
 
-	path, _ := config.ConfigPath()
+	path, _ := config.Path()
 	fmt.Printf("✓ Token validated and saved to %s\n", path)
 	if profileID != "" {
 		fmt.Printf("✓ Default profile set to %s\n", profileID)
@@ -176,7 +176,7 @@ func runAuthStatus(_ *cobra.Command, _ []string) error {
 
 // runAuthClear removes the config file after an interactive confirmation.
 func runAuthClear(_ *cobra.Command, _ []string) error {
-	cfgPath, err := config.ConfigPath()
+	cfgPath, err := config.Path()
 	if err != nil {
 		return err
 	}

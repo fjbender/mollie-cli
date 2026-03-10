@@ -204,10 +204,6 @@ func runDefaultsUnset(cmd *cobra.Command, _ []string) error {
 		current.DefaultWebhookURL = ""
 	} else {
 		// Interactive multi-select: let the user pick which defaults to clear.
-		type option struct {
-			label string
-			clear func()
-		}
 		candidates := []huh.Option[string]{}
 		if current.DefaultDescription != "" {
 			candidates = append(candidates, huh.NewOption("description ("+current.DefaultDescription+")", "description"))

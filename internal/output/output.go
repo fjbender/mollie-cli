@@ -15,6 +15,7 @@ import (
 // Format represents a supported output format.
 type Format string
 
+// Supported output format constants.
 const (
 	FormatTable Format = "table"
 	FormatJSON  Format = "json"
@@ -61,13 +62,13 @@ func PrintTable(header []string, rows [][]string, testMode bool) {
 	w := tabwriter.NewWriter(&buf, 0, 0, 2, ' ', 0)
 
 	if testMode {
-		fmt.Fprintln(w, "[TEST]")
+		_, _ = fmt.Fprintln(w, "[TEST]")
 	}
-	fmt.Fprintln(w, strings.Join(header, "\t"))
+	_, _ = fmt.Fprintln(w, strings.Join(header, "\t"))
 	for _, row := range rows {
-		fmt.Fprintln(w, strings.Join(row, "\t"))
+		_, _ = fmt.Fprintln(w, strings.Join(row, "\t"))
 	}
-	w.Flush()
+	_ = w.Flush()
 
 	// Now apply styles line-by-line to the already-aligned output.
 	headerLineIdx := 0
@@ -78,11 +79,11 @@ func PrintTable(header []string, rows [][]string, testMode bool) {
 	for i, line := range lines {
 		switch {
 		case testMode && i == 0:
-			fmt.Fprintln(os.Stdout, styled(testStyle, line))
+			_, _ = fmt.Fprintln(os.Stdout, styled(testStyle, line))
 		case i == headerLineIdx:
-			fmt.Fprintln(os.Stdout, styled(headerStyle, line))
+			_, _ = fmt.Fprintln(os.Stdout, styled(headerStyle, line))
 		default:
-			fmt.Fprintln(os.Stdout, line)
+			_, _ = fmt.Fprintln(os.Stdout, line)
 		}
 	}
 }
