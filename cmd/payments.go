@@ -46,6 +46,9 @@ var (
 	// capture mode flag
 	payCreateCaptureMode string
 
+	// locale flag
+	payCreateLocale string
+
 	// --with-lines flags
 	payCreateWithLines     bool
 	payCreateLinesVatRate  string
@@ -133,6 +136,7 @@ func init() {
 	paymentsCreateCmd.Flags().StringVar(&payCreateWebhookURL, "webhook-url", "", "Webhook URL for payment status updates (falls back to `defaults set --webhook-url`)")
 	paymentsCreateCmd.Flags().StringVar(&payCreateMetadata, "metadata", "", "Arbitrary JSON metadata to attach to the payment")
 	paymentsCreateCmd.Flags().StringVar(&payCreateCaptureMode, "capture-mode", "", "Capture mode: automatic or manual")
+	paymentsCreateCmd.Flags().StringVar(&payCreateLocale, "locale", "", "Locale for the payment, e.g. en_US, nl_NL (determines checkout language)")
 
 	// --with-lines flags
 	paymentsCreateCmd.Flags().BoolVar(&payCreateWithLines, "with-lines", false, "Auto-generate order lines summing to --amount")
@@ -240,6 +244,10 @@ func runPaymentsCreate(cmd *cobra.Command, _ []string) error {
 	if payCreateCaptureMode != "" {
 		cm := components.CaptureMode(payCreateCaptureMode)
 		req.CaptureMode = &cm
+	}
+	if payCreateLocale != "" {
+		l := components.Locale(payCreateLocale)
+		req.Locale = &l
 	}
 	if payCreateMetadata != "" {
 		meta, err := parseMetadata(payCreateMetadata)
