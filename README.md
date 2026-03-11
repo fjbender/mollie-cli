@@ -211,28 +211,6 @@ Pass a flag to override a specific JSON field without editing the file:
 cat request.json | mollie payments create --amount 9.99 --currency EUR
 ```
 
-### Supported commands and JSON fields
-
-| Command | Accepted JSON fields |
-|---|---|
-| `payments create` | `description`, `amount` (`{ value, currency }`), `redirectUrl`, `webhookUrl`, `method`, `customerId`, `sequenceType`, `captureMode`, `locale`, `metadata` |
-| `payments update` | `description`, `redirectUrl`, `webhookUrl`, `metadata` |
-| `customers create` | `name`, `email`, `metadata` |
-| `customers update` | `name`, `email`, `metadata` |
-| `customers payments create` | `description`, `amount`, `redirectUrl`, `webhookUrl`, `method`, `sequenceType`, `metadata` |
-| `captures create` | `amount` (`{ value, currency }`), `description`, `metadata` |
-| `refunds create` | `amount` (`{ value, currency }`), `description` |
-| `mandates create` | `method`, `consumerName`, `consumerAccount`, `consumerBic`, `consumerEmail`, `signatureDate`, `mandateReference` |
-| `subscriptions create` | `description`, `amount`, `interval`, `startDate`, `times`, `method`, `webhookUrl`, `mandateId`, `metadata` |
-| `subscriptions update` | `description`, `amount`, `interval`, `startDate`, `times`, `webhookUrl`, `mandateId`, `metadata` |
-| `payment-links create` | `description`, `amount`, `redirectUrl`, `webhookUrl`, `reusable`, `expiresAt` |
-| `payment-links update` | `description`, `archived` |
-| `profiles create` | `name`, `website`, `email`, `phone`, `businessCategory` |
-| `profiles update` | `name`, `website`, `email`, `phone`, `description`, `businessCategory` |
-| `sessions create` | `description`, `amount`, `redirectUrl`, `webhookUrl`, `customerId`, `sequenceType`, `metadata` |
-
-> **Note:** JSON arrays on stdin are not yet supported. Piping a JSON array will return a clear error message.
-
 ## Output formats
 
 All commands support three output formats via `--output` / `-o`:
