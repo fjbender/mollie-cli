@@ -14,23 +14,29 @@ type ProfileOption struct {
 	Value string // the profile ID stored in config
 }
 
-// APIKey prompts the user interactively for a Mollie Organization Access Token.
-// It validates that the input starts with "access_" before accepting the value.
+// APIKey prompts the user interactively for a Mollie API key or Organization
+// Access Token. It accepts all three supported prefixes:
+//   - access_ — Organization Access Token
+//   - test_   — Test-mode API key (profile-scoped)
+//   - live_   — Live-mode API key (profile-scoped)
 func APIKey() (string, error) {
 	var apiKey string
 
 	form := huh.NewForm(
 		huh.NewGroup(
 			huh.NewInput().
-				Title("Mollie Organization Access Token").
-				Description("Paste your token (format: access_*)").
+				Title("Mollie API Key / Organization Access Token").
+				Description("Paste your key (format: access_*, test_*, or live_*)").
 				EchoMode(huh.EchoModePassword).
 				Validate(func(s string) error {
 					s = strings.TrimSpace(s)
-					if !strings.HasPrefix(s, "access_") || len(s) < 15 {
-						return fmt.Errorf("token must start with 'access_' and be a valid access token")
+					if strings.HasPrefix(s, "access_") && len(s) >= 15 {
+						return nil
 					}
-					return nil
+					if (strings.HasPrefix(s, "test_") || strings.HasPrefix(s, "live_")) && len(s) >= 10 {
+						return nil
+					}
+					return fmt.Errorf("key must start with 'access_', 'test_', or 'live_'")
 				}).
 				Value(&apiKey),
 		),

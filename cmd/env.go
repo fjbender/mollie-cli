@@ -124,7 +124,14 @@ func runEnvList(_ *cobra.Command, _ []string) error {
 		profile := dash(env.ProfileID)
 
 		liveMode := "no"
-		if env.LiveMode {
+		if config.IsAPIKey(env.APIKey) {
+			// For API keys the mode is baked into the key prefix, not the LiveMode flag.
+			if config.IsLiveAPIKey(env.APIKey) {
+				liveMode = "yes (key)"
+			} else {
+				liveMode = "no (key)"
+			}
+		} else if env.LiveMode {
 			liveMode = "yes"
 		}
 

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/pelletier/go-toml/v2"
 )
@@ -54,6 +55,17 @@ type Config struct {
 // IsConfigured returns true when an API key is present.
 func (c *Config) IsConfigured() bool {
 	return c.APIKey != ""
+}
+
+// IsAPIKey reports whether key is a profile-scoped API key (prefixed with
+// "test_" or "live_") rather than an Organization Access Token ("access_").
+func IsAPIKey(key string) bool {
+	return strings.HasPrefix(key, "test_") || strings.HasPrefix(key, "live_")
+}
+
+// IsLiveAPIKey reports whether key is a live-mode API key (prefixed with "live_").
+func IsLiveAPIKey(key string) bool {
+	return strings.HasPrefix(key, "live_")
 }
 
 // ConfigFile is the complete on-disk representation of the config file,

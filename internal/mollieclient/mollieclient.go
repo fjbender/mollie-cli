@@ -14,7 +14,9 @@ import (
 //
 //   - apiKeyOverride — set from --api-key flag; takes precedence over cfg.APIKey
 //   - liveMode       — set from --live flag; when true test mode is disabled
+//     (ignored when key is an API key — mode is determined by key prefix)
 //   - profileID      — set from --profile flag; takes precedence over cfg.ProfileID
+//     (ignored when key is an API key — profile is baked into the key)
 func New(cfg *config.Config, apiKeyOverride string, liveMode bool, profileID string) (*mollieapi.Client, error) {
 	apiKey := cfg.APIKey
 	if apiKeyOverride != "" {
@@ -24,27 +26,36 @@ func New(cfg *config.Config, apiKeyOverride string, liveMode bool, profileID str
 		return nil, fmt.Errorf("no API key configured — run `mollie auth setup` to get started")
 	}
 
+	// API keys (test_/live_) are profile- and mode-scoped, so they use the http
+	// bearer security scheme and must NOT have testmode or profileId injected.
+	// Organization Access Tokens use the OAuth security scheme and require both.
+	var sec components.Security
+	if config.IsAPIKey(apiKey) {
+		sec = components.Security{APIKey: &apiKey}
+	} else {
+		sec = components.Security{OAuth: &apiKey}
+	}
+
 	opts := []mollieapi.SDKOption{
-		// Organization Access Tokens must be provided via the OAuth security field.
-		// This activates the SDK's BeforeRequest hook, which automatically injects
-		// testmode and profileId into all POST/PATCH/DELETE request bodies — a
-		// requirement when using access tokens instead of per-environment API keys.
-		mollieapi.WithSecurity(components.Security{
-			OAuth: &apiKey,
-		}),
-		// Test mode is the safe default; live mode is opt-in via --live or config.
-		mollieapi.WithTestmode(!liveMode),
+		mollieapi.WithSecurity(sec),
 		// Identify the Mollie CLI through User Agent
 		mollieapi.WithCustomUserAgent("Mollie-CLI/1.0.0"),
 	}
 
-	// Profile ID: flag override > config value.
-	resolvedProfile := cfg.ProfileID
-	if profileID != "" {
-		resolvedProfile = profileID
-	}
-	if resolvedProfile != "" {
-		opts = append(opts, mollieapi.WithProfileID(resolvedProfile))
+	// testmode and profileId are only meaningful for Organization Access Tokens.
+	// API keys are already scoped to a specific mode and profile.
+	if !config.IsAPIKey(apiKey) {
+		// Test mode is the safe default; live mode is opt-in via --live or config.
+		opts = append(opts, mollieapi.WithTestmode(!liveMode))
+
+		// Profile ID: flag override > config value.
+		resolvedProfile := cfg.ProfileID
+		if profileID != "" {
+			resolvedProfile = profileID
+		}
+		if resolvedProfile != "" {
+			opts = append(opts, mollieapi.WithProfileID(resolvedProfile))
+		}
 	}
 
 	return mollieapi.New(opts...), nil

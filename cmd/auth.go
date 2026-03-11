@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/charmbracelet/huh"
 	"github.com/fjbender/mollie-cli/internal/config"
@@ -12,6 +13,7 @@ import (
 	"github.com/fjbender/mollie-cli/internal/output"
 	"github.com/fjbender/mollie-cli/internal/prompt"
 	mollieapi "github.com/mollie/mollie-api-golang"
+	"github.com/mollie/mollie-api-golang/models/operations"
 	"github.com/spf13/cobra"
 )
 
@@ -67,29 +69,43 @@ func runAuthSetup(_ *cobra.Command, _ []string) error {
 		return fmt.Errorf("prompt failed: %w", err)
 	}
 
-	fmt.Println("Validating token …")
+	fmt.Println("Validating key …")
 
-	// Validate the token by hitting GET /v2/organizations/me.
-	// Organizations/me and Profiles/list only work in live mode, so we use
-	// NewOrganizationClient which omits WithTestmode entirely.
 	tmpCfg := &config.Config{APIKey: apiKey}
-	client, err := mollieclient.NewOrganizationClient(tmpCfg, "")
-	if err != nil {
-		return err
-	}
+	var profileID string
 
-	if _, err := client.Organizations.GetCurrent(context.Background(), nil); err != nil {
-		return fmt.Errorf("token validation failed — the key has NOT been saved\n  %w", err)
-	}
-
-	// Fetch available profiles so the user can select one up-front.
-	profileID, err := selectProfileInteractively(client)
-	if err != nil {
-		if errors.Is(err, huh.ErrUserAborted) {
-			fmt.Println("Setup cancelled.")
-			return nil
+	if config.IsAPIKey(apiKey) {
+		// API keys are mode- and profile-scoped; validate via list-methods which
+		// works for all key types and requires no special parameters.
+		liveMode := config.IsLiveAPIKey(apiKey)
+		client, err := mollieclient.New(tmpCfg, "", liveMode, "")
+		if err != nil {
+			return err
 		}
-		return err
+		if _, err := client.Methods.List(context.Background(), operations.ListMethodsRequest{}); err != nil {
+			return fmt.Errorf("API key validation failed — the key has NOT been saved\n  %w", err)
+		}
+		// API keys are already profile-scoped; no profile selection needed.
+	} else {
+		// Organization Access Token: validate via GET /v2/organizations/me and
+		// offer interactive profile selection.
+		// NewOrganizationClient omits WithTestmode/WithProfileID — both are
+		// unsupported by organization-level endpoints.
+		client, err := mollieclient.NewOrganizationClient(tmpCfg, "")
+		if err != nil {
+			return err
+		}
+		if _, err := client.Organizations.GetCurrent(context.Background(), nil); err != nil {
+			return fmt.Errorf("token validation failed — the key has NOT been saved\n  %w", err)
+		}
+		profileID, err = selectProfileInteractively(client)
+		if err != nil {
+			if errors.Is(err, huh.ErrUserAborted) {
+				fmt.Println("Setup cancelled.")
+				return nil
+			}
+			return err
+		}
 	}
 
 	// Load existing config so we don't clobber other settings.
@@ -108,7 +124,7 @@ func runAuthSetup(_ *cobra.Command, _ []string) error {
 	}
 
 	path, _ := config.Path()
-	fmt.Printf("✓ Token validated and saved to %s\n", path)
+	fmt.Printf("✓ Key validated and saved to %s\n", path)
 	if profileID != "" {
 		fmt.Printf("✓ Default profile set to %s\n", profileID)
 	}
@@ -168,9 +184,18 @@ func runAuthStatus(_ *cobra.Command, _ []string) error {
 		envName = f.ActiveEnvName()
 	}
 
-	liveModeStr := "false (test mode is active)"
-	if c.LiveMode {
+	var liveModeStr string
+	if config.IsAPIKey(c.APIKey) {
+		// For API keys the mode is baked into the key prefix.
+		if config.IsLiveAPIKey(c.APIKey) {
+			liveModeStr = "true (live_ key)"
+		} else {
+			liveModeStr = "false (test_ key)"
+		}
+	} else if c.LiveMode {
 		liveModeStr = "true"
+	} else {
+		liveModeStr = "false (test mode is active)"
 	}
 
 	output.PrintTable(
@@ -229,12 +254,22 @@ func runAuthClear(_ *cobra.Command, _ []string) error {
 	return nil
 }
 
-// maskAPIKey returns a masked representation: access_****xyz
+// maskAPIKey returns a redacted representation of any supported key type:
+// access_****xyz, test_****xyz, or live_****xyz.
 func maskAPIKey(key string) string {
-	if len(key) <= 12 {
-		return "access_****"
+	for _, prefix := range []string{"access_", "live_", "test_"} {
+		if strings.HasPrefix(key, prefix) {
+			if len(key) <= len(prefix)+3 {
+				return prefix + "****"
+			}
+			return prefix + "****" + key[len(key)-3:]
+		}
 	}
-	return key[:7] + "****" + key[len(key)-3:]
+	// Unknown format: redact everything except the last 3 chars.
+	if len(key) <= 7 {
+		return "****"
+	}
+	return "****" + key[len(key)-3:]
 }
 
 // dash returns "—" for empty strings, otherwise the value as-is.
