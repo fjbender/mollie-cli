@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/charmbracelet/huh"
+	"github.com/fjbender/mollie-cli/internal/input"
 	"github.com/fjbender/mollie-cli/internal/mollieclient"
 	"github.com/fjbender/mollie-cli/internal/output"
 	"github.com/fjbender/mollie-cli/internal/prompt"
@@ -78,7 +79,8 @@ func init() {
 	mandatesCreateCmd.Flags().StringVar(&manConsumerEmail, "consumer-email", "", "Consumer email (required for paypal)")
 	mandatesCreateCmd.Flags().StringVar(&manSignatureDate, "signature-date", "", "Date mandate was signed, YYYY-MM-DD")
 	mandatesCreateCmd.Flags().StringVar(&manReference, "mandate-reference", "", "Custom mandate reference")
-	mandatesCreateCmd.MarkFlagRequired("consumer-name") //nolint:errcheck
+	// consumerName is validated in runMandatesCreate so that JSON stdin can
+	// supply it without triggering Cobra's pre-RunE flag validation.
 
 	// list flags
 	mandatesListCmd.Flags().Int64Var(&manListLimit, "limit", 50, "Maximum number of results to return")
@@ -97,8 +99,42 @@ func init() {
 
 // ── handlers ───────────────────────────────────────────────────────────────────────────────────
 
-func runMandatesCreate(_ *cobra.Command, args []string) error {
+func runMandatesCreate(cmd *cobra.Command, args []string) error {
 	customerID := args[0]
+
+	// ── JSON stdin input ─────────────────────────────────────────────────────
+	jsonInput, err := input.ReadStdin()
+	if err != nil {
+		return err
+	}
+	if jsonInput != nil {
+		if v, ok := input.Str(jsonInput, "method"); ok && !cmd.Flags().Changed("method") {
+			manMethod = v
+		}
+		if v, ok := input.Str(jsonInput, "consumerName"); ok && !cmd.Flags().Changed("consumer-name") {
+			manConsumerName = v
+		}
+		if v, ok := input.Str(jsonInput, "consumerAccount"); ok && !cmd.Flags().Changed("consumer-account") {
+			manConsumerAccount = v
+		}
+		if v, ok := input.Str(jsonInput, "consumerBic"); ok && !cmd.Flags().Changed("consumer-bic") {
+			manConsumerBic = v
+		}
+		if v, ok := input.Str(jsonInput, "consumerEmail"); ok && !cmd.Flags().Changed("consumer-email") {
+			manConsumerEmail = v
+		}
+		if v, ok := input.Str(jsonInput, "signatureDate"); ok && !cmd.Flags().Changed("signature-date") {
+			manSignatureDate = v
+		}
+		if v, ok := input.Str(jsonInput, "mandateReference"); ok && !cmd.Flags().Changed("mandate-reference") {
+			manReference = v
+		}
+	}
+
+	// consumerName is required but may arrive from JSON stdin.
+	if manConsumerName == "" {
+		return fmt.Errorf("required flag \"consumer-name\" not set")
+	}
 
 	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile)
 	if err != nil {

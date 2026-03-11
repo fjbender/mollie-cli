@@ -157,6 +157,82 @@ mollie defaults unset --all # wipe every default at once
 
 Defaults act as **fallbacks** — an explicit flag always takes priority over a stored default. Commands that honour defaults accept the same parameters (`--amount`, `--currency`, `--description`, `--redirect-url`, `--webhook-url`) and fall back to the stored values when those flags are omitted.
 
+## JSON stdin
+
+`create` (and `update`) commands that accept flags also accept a **JSON object on stdin** as an alternative input source. This makes it easy to pipe API responses from one command into another, drive the CLI from a file, or integrate it with tools like `jq`.
+
+### Precedence
+
+From highest to lowest authority:
+
+1. **Explicit CLI flags** — always win.
+2. **stdin JSON** — fills in fields _not_ covered by an explicit flag.
+3. **Stored config defaults** — fill in whatever remains.
+
+### Piping a file
+
+```bash
+# payments create — all Mollie API field names accepted
+cat request.json | mollie payments create
+# or
+mollie payments create < request.json
+```
+
+`request.json` example:
+```json
+{
+  "description": "Order #42",
+  "amount": { "value": "24.99", "currency": "EUR" },
+  "redirectUrl": "https://example.com/thanks",
+  "webhookUrl": "https://example.com/webhook",
+  "method": "ideal",
+  "metadata": { "order_id": "42" }
+}
+```
+
+### Piping between commands
+
+`-o json` output from a `get` / `list` command can be piped directly into a `create` command — the CLI reads only the fields it understands and ignores the rest:
+
+```bash
+# Replay an existing payment as a new one:
+mollie payments get tr_abc123 -o json | mollie payments create
+
+# Duplicate a payment link with a different description:
+mollie payment-links get pl_xyz -o json \
+  | mollie payment-links create --description "Updated link"
+```
+
+### Explicit flags always win
+
+Pass a flag to override a specific JSON field without editing the file:
+
+```bash
+cat request.json | mollie payments create --amount 9.99 --currency EUR
+```
+
+### Supported commands and JSON fields
+
+| Command | Accepted JSON fields |
+|---|---|
+| `payments create` | `description`, `amount` (`{ value, currency }`), `redirectUrl`, `webhookUrl`, `method`, `customerId`, `sequenceType`, `captureMode`, `locale`, `metadata` |
+| `payments update` | `description`, `redirectUrl`, `webhookUrl`, `metadata` |
+| `customers create` | `name`, `email`, `metadata` |
+| `customers update` | `name`, `email`, `metadata` |
+| `customers payments create` | `description`, `amount`, `redirectUrl`, `webhookUrl`, `method`, `sequenceType`, `metadata` |
+| `captures create` | `amount` (`{ value, currency }`), `description`, `metadata` |
+| `refunds create` | `amount` (`{ value, currency }`), `description` |
+| `mandates create` | `method`, `consumerName`, `consumerAccount`, `consumerBic`, `consumerEmail`, `signatureDate`, `mandateReference` |
+| `subscriptions create` | `description`, `amount`, `interval`, `startDate`, `times`, `method`, `webhookUrl`, `mandateId`, `metadata` |
+| `subscriptions update` | `description`, `amount`, `interval`, `startDate`, `times`, `webhookUrl`, `mandateId`, `metadata` |
+| `payment-links create` | `description`, `amount`, `redirectUrl`, `webhookUrl`, `reusable`, `expiresAt` |
+| `payment-links update` | `description`, `archived` |
+| `profiles create` | `name`, `website`, `email`, `phone`, `businessCategory` |
+| `profiles update` | `name`, `website`, `email`, `phone`, `description`, `businessCategory` |
+| `sessions create` | `description`, `amount`, `redirectUrl`, `webhookUrl`, `customerId`, `sequenceType`, `metadata` |
+
+> **Note:** JSON arrays on stdin are not yet supported. Piping a JSON array will return a clear error message.
+
 ## Output formats
 
 All commands support three output formats via `--output` / `-o`:

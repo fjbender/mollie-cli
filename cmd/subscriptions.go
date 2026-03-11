@@ -7,6 +7,7 @@ import (
 	"strconv"
 
 	"github.com/charmbracelet/huh"
+	"github.com/fjbender/mollie-cli/internal/input"
 	"github.com/fjbender/mollie-cli/internal/mollieclient"
 	"github.com/fjbender/mollie-cli/internal/output"
 	"github.com/fjbender/mollie-cli/internal/prompt"
@@ -125,7 +126,8 @@ func init() {
 	subscriptionsCreateCmd.Flags().StringVar(&subCreateWebhookURL, "webhook-url", "", "Webhook URL for payment status updates (falls back to `defaults set --webhook-url`)")
 	subscriptionsCreateCmd.Flags().StringVar(&subCreateMetadata, "metadata", "", "Arbitrary JSON metadata")
 	subscriptionsCreateCmd.Flags().StringVar(&subCreateMandateID, "mandate-id", "", "Specific mandate ID to use")
-	subscriptionsCreateCmd.MarkFlagRequired("interval") //nolint:errcheck
+	// interval is validated in runSubscriptionsCreate so that JSON stdin can
+	// supply it without triggering Cobra's pre-RunE flag validation.
 
 	// list flags
 	subscriptionsListCmd.Flags().Int64Var(&subListLimit, "limit", 50, "Maximum number of results to return")
@@ -169,12 +171,52 @@ func init() {
 func runSubscriptionsCreate(cmd *cobra.Command, args []string) error {
 	customerID := args[0]
 
+	// ── JSON stdin input ─────────────────────────────────────────────────────
+	jsonInput, err := input.ReadStdin()
+	if err != nil {
+		return err
+	}
+	if jsonInput != nil {
+		if v, ok := input.Str(jsonInput, "description"); ok && !cmd.Flags().Changed("description") {
+			subCreateDescription = v
+		}
+		if val, cur, ok := input.Amount(jsonInput, "amount"); ok {
+			if !cmd.Flags().Changed("amount") {
+				subCreateAmount = val
+			}
+			if !cmd.Flags().Changed("currency") {
+				subCreateCurrency = cur
+			}
+		}
+		if v, ok := input.Str(jsonInput, "interval"); ok && !cmd.Flags().Changed("interval") {
+			subCreateInterval = v
+		}
+		if v, ok := input.Str(jsonInput, "startDate"); ok && !cmd.Flags().Changed("start-date") {
+			subCreateStartDate = v
+		}
+		if v, ok := input.Int64(jsonInput, "times"); ok && !cmd.Flags().Changed("times") {
+			subCreateTimes = v
+		}
+		if v, ok := input.Str(jsonInput, "method"); ok && !cmd.Flags().Changed("method") {
+			subCreateMethod = v
+		}
+		if v, ok := input.Str(jsonInput, "webhookUrl"); ok && !cmd.Flags().Changed("webhook-url") {
+			subCreateWebhookURL = v
+		}
+		if v, ok := input.Str(jsonInput, "mandateId"); ok && !cmd.Flags().Changed("mandate-id") {
+			subCreateMandateID = v
+		}
+		if v, ok := input.RawJSON(jsonInput, "metadata"); ok && !cmd.Flags().Changed("metadata") {
+			subCreateMetadata = v
+		}
+	}
+
 	applyCreateDefaults(cmd,
 		&subCreateDescription, &subCreateAmount, &subCreateCurrency,
 		nil, &subCreateWebhookURL, // subscriptions have no redirect-url
 	)
 
-	// Validate fields that are required but may come from defaults.
+	// Validate fields that are required but may come from defaults or JSON stdin.
 	switch {
 	case subCreateAmount == "":
 		return fmt.Errorf("required flag \"amount\" not set and no default configured (run `mollie defaults set`)")
@@ -182,6 +224,8 @@ func runSubscriptionsCreate(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("required flag \"currency\" not set and no default configured (run `mollie defaults set`)")
 	case subCreateDescription == "":
 		return fmt.Errorf("required flag \"description\" not set and no default configured (run `mollie defaults set`)")
+	case subCreateInterval == "":
+		return fmt.Errorf("required flag \"interval\" not set")
 	}
 
 	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile)
@@ -397,8 +441,45 @@ func runSubscriptionsGet(_ *cobra.Command, args []string) error {
 	return nil
 }
 
-func runSubscriptionsUpdate(_ *cobra.Command, args []string) error {
+func runSubscriptionsUpdate(cmd *cobra.Command, args []string) error {
 	customerID, subscriptionID := args[0], args[1]
+
+	// ── JSON stdin input ─────────────────────────────────────────────────────
+	jsonInput, err := input.ReadStdin()
+	if err != nil {
+		return err
+	}
+	if jsonInput != nil {
+		if val, cur, ok := input.Amount(jsonInput, "amount"); ok {
+			if !cmd.Flags().Changed("amount") {
+				subUpdateAmount = val
+			}
+			if !cmd.Flags().Changed("currency") {
+				subUpdateCurrency = cur
+			}
+		}
+		if v, ok := input.Str(jsonInput, "interval"); ok && !cmd.Flags().Changed("interval") {
+			subUpdateInterval = v
+		}
+		if v, ok := input.Str(jsonInput, "description"); ok && !cmd.Flags().Changed("description") {
+			subUpdateDescription = v
+		}
+		if v, ok := input.Str(jsonInput, "startDate"); ok && !cmd.Flags().Changed("start-date") {
+			subUpdateStartDate = v
+		}
+		if v, ok := input.Int64(jsonInput, "times"); ok && !cmd.Flags().Changed("times") {
+			subUpdateTimes = v
+		}
+		if v, ok := input.Str(jsonInput, "webhookUrl"); ok && !cmd.Flags().Changed("webhook-url") {
+			subUpdateWebhookURL = v
+		}
+		if v, ok := input.Str(jsonInput, "mandateId"); ok && !cmd.Flags().Changed("mandate-id") {
+			subUpdateMandateID = v
+		}
+		if v, ok := input.RawJSON(jsonInput, "metadata"); ok && !cmd.Flags().Changed("metadata") {
+			subUpdateMetadata = v
+		}
+	}
 
 	if (subUpdateAmount == "") != (subUpdateCurrency == "") {
 		return fmt.Errorf("--amount and --currency must both be set")

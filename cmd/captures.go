@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/fjbender/mollie-cli/internal/input"
 	"github.com/fjbender/mollie-cli/internal/mollieclient"
 	"github.com/fjbender/mollie-cli/internal/output"
 	"github.com/mollie/mollie-api-golang/models/components"
@@ -73,8 +74,30 @@ func init() {
 
 // ── handlers ─────────────────────────────────────────────────────────────────
 
-func runCapturesCreate(_ *cobra.Command, args []string) error {
+func runCapturesCreate(cmd *cobra.Command, args []string) error {
 	paymentID := args[0]
+
+	// ── JSON stdin input ─────────────────────────────────────────────────────
+	jsonInput, err := input.ReadStdin()
+	if err != nil {
+		return err
+	}
+	if jsonInput != nil {
+		if val, cur, ok := input.Amount(jsonInput, "amount"); ok {
+			if !cmd.Flags().Changed("amount") {
+				capCreateAmount = val
+			}
+			if !cmd.Flags().Changed("currency") {
+				capCreateCurrency = cur
+			}
+		}
+		if v, ok := input.Str(jsonInput, "description"); ok && !cmd.Flags().Changed("description") {
+			capCreateDescription = v
+		}
+		if v, ok := input.RawJSON(jsonInput, "metadata"); ok && !cmd.Flags().Changed("metadata") {
+			capCreateMetadata = v
+		}
+	}
 
 	// --amount and --currency must be supplied together.
 	if (capCreateAmount == "") != (capCreateCurrency == "") {

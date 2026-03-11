@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/charmbracelet/huh"
+	"github.com/fjbender/mollie-cli/internal/input"
 	"github.com/fjbender/mollie-cli/internal/mollieclient"
 	"github.com/fjbender/mollie-cli/internal/output"
 	"github.com/fjbender/mollie-cli/internal/prompt"
@@ -102,8 +103,27 @@ func init() {
 
 // ── handlers ─────────────────────────────────────────────────────────────────
 
-func runRefundsCreate(_ *cobra.Command, args []string) error {
+func runRefundsCreate(cmd *cobra.Command, args []string) error {
 	paymentID := args[0]
+
+	// ── JSON stdin input ─────────────────────────────────────────────────────
+	jsonInput, err := input.ReadStdin()
+	if err != nil {
+		return err
+	}
+	if jsonInput != nil {
+		if val, cur, ok := input.Amount(jsonInput, "amount"); ok {
+			if !cmd.Flags().Changed("amount") {
+				refCreateAmount = val
+			}
+			if !cmd.Flags().Changed("currency") {
+				refCreateCurrency = cur
+			}
+		}
+		if v, ok := input.Str(jsonInput, "description"); ok && !cmd.Flags().Changed("description") {
+			refCreateDescription = v
+		}
+	}
 
 	// --amount and --currency must be supplied together.
 	if (refCreateAmount == "") != (refCreateCurrency == "") {

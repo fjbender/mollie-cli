@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/charmbracelet/huh"
+	"github.com/fjbender/mollie-cli/internal/input"
 	"github.com/fjbender/mollie-cli/internal/mollieclient"
 	"github.com/fjbender/mollie-cli/internal/output"
 	"github.com/fjbender/mollie-cli/internal/prompt"
@@ -97,10 +98,8 @@ func init() {
 	profilesCreateCmd.Flags().StringVar(&profCreateEmail, "email", "", "Email address associated with the profile (required)")
 	profilesCreateCmd.Flags().StringVar(&profCreatePhone, "phone", "", "Phone number associated with the profile (required)")
 	profilesCreateCmd.Flags().StringVar(&profCreateCategory, "category", "", "Merchant category code (e.g. 5399)")
-	profilesCreateCmd.MarkFlagRequired("name")    //nolint:errcheck
-	profilesCreateCmd.MarkFlagRequired("website") //nolint:errcheck
-	profilesCreateCmd.MarkFlagRequired("email")   //nolint:errcheck
-	profilesCreateCmd.MarkFlagRequired("phone")   //nolint:errcheck
+	// Required fields are validated in runProfilesCreate so that JSON stdin can
+	// supply them without triggering Cobra's pre-RunE flag validation.
 
 	// update flags
 	profilesUpdateCmd.Flags().StringVar(&profUpdateName, "name", "", "New profile name")
@@ -226,7 +225,42 @@ func runProfilesCurrent(_ *cobra.Command, _ []string) error {
 	return nil
 }
 
-func runProfilesCreate(_ *cobra.Command, _ []string) error {
+func runProfilesCreate(cmd *cobra.Command, _ []string) error {
+	// ── JSON stdin input ─────────────────────────────────────────────────────
+	jsonInput, err := input.ReadStdin()
+	if err != nil {
+		return err
+	}
+	if jsonInput != nil {
+		if v, ok := input.Str(jsonInput, "name"); ok && !cmd.Flags().Changed("name") {
+			profCreateName = v
+		}
+		if v, ok := input.Str(jsonInput, "website"); ok && !cmd.Flags().Changed("website") {
+			profCreateWebsite = v
+		}
+		if v, ok := input.Str(jsonInput, "email"); ok && !cmd.Flags().Changed("email") {
+			profCreateEmail = v
+		}
+		if v, ok := input.Str(jsonInput, "phone"); ok && !cmd.Flags().Changed("phone") {
+			profCreatePhone = v
+		}
+		if v, ok := input.Str(jsonInput, "businessCategory"); ok && !cmd.Flags().Changed("category") {
+			profCreateCategory = v
+		}
+	}
+
+	// Validate required fields (may have been supplied via JSON stdin).
+	switch {
+	case profCreateName == "":
+		return fmt.Errorf("required flag \"name\" not set")
+	case profCreateWebsite == "":
+		return fmt.Errorf("required flag \"website\" not set")
+	case profCreateEmail == "":
+		return fmt.Errorf("required flag \"email\" not set")
+	case profCreatePhone == "":
+		return fmt.Errorf("required flag \"phone\" not set")
+	}
+
 	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile)
 	if err != nil {
 		return err
@@ -270,7 +304,33 @@ func runProfilesCreate(_ *cobra.Command, _ []string) error {
 	return nil
 }
 
-func runProfilesUpdate(_ *cobra.Command, args []string) error {
+func runProfilesUpdate(cmd *cobra.Command, args []string) error {
+	// ── JSON stdin input ─────────────────────────────────────────────────────
+	jsonInput, err := input.ReadStdin()
+	if err != nil {
+		return err
+	}
+	if jsonInput != nil {
+		if v, ok := input.Str(jsonInput, "name"); ok && !cmd.Flags().Changed("name") {
+			profUpdateName = v
+		}
+		if v, ok := input.Str(jsonInput, "website"); ok && !cmd.Flags().Changed("website") {
+			profUpdateWebsite = v
+		}
+		if v, ok := input.Str(jsonInput, "email"); ok && !cmd.Flags().Changed("email") {
+			profUpdateEmail = v
+		}
+		if v, ok := input.Str(jsonInput, "phone"); ok && !cmd.Flags().Changed("phone") {
+			profUpdatePhone = v
+		}
+		if v, ok := input.Str(jsonInput, "description"); ok && !cmd.Flags().Changed("description") {
+			profUpdateDescription = v
+		}
+		if v, ok := input.Str(jsonInput, "businessCategory"); ok && !cmd.Flags().Changed("category") {
+			profUpdateCategory = v
+		}
+	}
+
 	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile)
 	if err != nil {
 		return err

@@ -284,19 +284,19 @@ func applyCreateDefaults(
 	cmd *cobra.Command,
 	description, amount, currency, redirectURL, webhookURL *string,
 ) {
-	if description != nil && !cmd.Flags().Changed("description") && cfg.DefaultDescription != "" {
+	if description != nil && !cmd.Flags().Changed("description") && *description == "" && cfg.DefaultDescription != "" {
 		*description = cfg.DefaultDescription
 	}
-	if amount != nil && !cmd.Flags().Changed("amount") && cfg.DefaultAmount != "" {
+	if amount != nil && !cmd.Flags().Changed("amount") && *amount == "" && cfg.DefaultAmount != "" {
 		*amount = cfg.DefaultAmount
 	}
-	if currency != nil && !cmd.Flags().Changed("currency") && cfg.DefaultCurrency != "" {
+	if currency != nil && !cmd.Flags().Changed("currency") && *currency == "" && cfg.DefaultCurrency != "" {
 		*currency = cfg.DefaultCurrency
 	}
-	if redirectURL != nil && !cmd.Flags().Changed("redirect-url") && cfg.DefaultRedirectURL != "" {
+	if redirectURL != nil && !cmd.Flags().Changed("redirect-url") && *redirectURL == "" && cfg.DefaultRedirectURL != "" {
 		*redirectURL = cfg.DefaultRedirectURL
 	}
-	if webhookURL != nil && !cmd.Flags().Changed("webhook-url") && cfg.DefaultWebhookURL != "" {
+	if webhookURL != nil && !cmd.Flags().Changed("webhook-url") && *webhookURL == "" && cfg.DefaultWebhookURL != "" {
 		*webhookURL = cfg.DefaultWebhookURL
 	}
 }

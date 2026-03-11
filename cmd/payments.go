@@ -8,6 +8,7 @@ import (
 	"strconv"
 
 	"github.com/charmbracelet/huh"
+	"github.com/fjbender/mollie-cli/internal/input"
 	"github.com/fjbender/mollie-cli/internal/mollieclient"
 	"github.com/fjbender/mollie-cli/internal/output"
 	"github.com/fjbender/mollie-cli/internal/prompt"
@@ -195,6 +196,51 @@ func init() {
 // ── handlers ─────────────────────────────────────────────────────────────────
 
 func runPaymentsCreate(cmd *cobra.Command, _ []string) error {
+	// ── JSON stdin input ─────────────────────────────────────────────────────
+	// Flags take highest precedence; JSON overrides only fields not explicitly
+	// set on the command line. Config defaults fill in whatever remains.
+	jsonInput, err := input.ReadStdin()
+	if err != nil {
+		return err
+	}
+	if jsonInput != nil {
+		if v, ok := input.Str(jsonInput, "description"); ok && !cmd.Flags().Changed("description") {
+			payCreateDescription = v
+		}
+		if val, cur, ok := input.Amount(jsonInput, "amount"); ok {
+			if !cmd.Flags().Changed("amount") {
+				payCreateAmount = val
+			}
+			if !cmd.Flags().Changed("currency") {
+				payCreateCurrency = cur
+			}
+		}
+		if v, ok := input.Str(jsonInput, "redirectUrl"); ok && !cmd.Flags().Changed("redirect-url") {
+			payCreateRedirectURL = v
+		}
+		if v, ok := input.Str(jsonInput, "webhookUrl"); ok && !cmd.Flags().Changed("webhook-url") {
+			payCreateWebhookURL = v
+		}
+		if v, ok := input.Str(jsonInput, "method"); ok && !cmd.Flags().Changed("method") {
+			payCreateMethod = v
+		}
+		if v, ok := input.Str(jsonInput, "customerId"); ok && !cmd.Flags().Changed("customer-id") {
+			payCreateCustomerID = v
+		}
+		if v, ok := input.Str(jsonInput, "sequenceType"); ok && !cmd.Flags().Changed("sequence-type") {
+			payCreateSequenceType = v
+		}
+		if v, ok := input.Str(jsonInput, "captureMode"); ok && !cmd.Flags().Changed("capture-mode") {
+			payCreateCaptureMode = v
+		}
+		if v, ok := input.Str(jsonInput, "locale"); ok && !cmd.Flags().Changed("locale") {
+			payCreateLocale = v
+		}
+		if v, ok := input.RawJSON(jsonInput, "metadata"); ok && !cmd.Flags().Changed("metadata") {
+			payCreateMetadata = v
+		}
+	}
+
 	applyCreateDefaults(cmd,
 		&payCreateDescription, &payCreateAmount, &payCreateCurrency,
 		&payCreateRedirectURL, &payCreateWebhookURL,
@@ -217,14 +263,45 @@ func runPaymentsCreate(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	req := &components.PaymentRequest{
-		Description: payCreateDescription,
-		Amount: components.Amount{
-			Currency: payCreateCurrency,
-			Value:    payCreateAmount,
-		},
-		RedirectURL: &payCreateRedirectURL,
+	// ── Build request ─────────────────────────────────────────────────────────
+	//
+	// Seed req from the full JSON object first so that fields without a flag
+	// equivalent (billingAddress, shippingAddress, lines, cancelUrl, issuer,
+	// restrictPaymentMethodsToCountry, …) are forwarded to the API as-is.
+	// Resolved flag-mapped values are applied on top afterwards, preserving the
+	// flag > JSON stdin > config default precedence for every field that has a
+	// CLI flag.
+	//
+	// We extract each pass-through field individually rather than doing a single
+	// json.Unmarshal(rawBytes, req) round-trip.  The reason: PaymentRequest uses
+	// a Speakeasy-generated custom UnmarshalJSON that processes struct fields in
+	// declaration order and returns on the first error.  A single type mismatch
+	// (e.g. vatRate supplied as a JSON number instead of a quoted string) would
+	// silently abort the whole unmarshal, leaving every subsequent field —
+	// including billingAddress — unset.
+	req := &components.PaymentRequest{}
+	if jsonInput != nil {
+		seedPassThroughFields(req, jsonInput)
 	}
+
+	// Always apply the resolved flag-mapped values (these override whatever the
+	// JSON seed may have set for these particular fields).
+	req.Description = payCreateDescription
+	req.Amount = components.Amount{
+		Currency: payCreateCurrency,
+		Value:    payCreateAmount,
+	}
+	req.RedirectURL = &payCreateRedirectURL
+
+	// Reset optional flag-mapped pointer fields so stale JSON-seeded values
+	// don't bleed through when neither a flag nor JSON specified them.
+	req.WebhookURL = nil
+	req.CustomerID = nil
+	req.SequenceType = nil
+	req.Method = nil
+	req.CaptureMode = nil
+	req.Locale = nil
+	req.Metadata = nil
 
 	if payCreateWebhookURL != "" {
 		req.WebhookURL = &payCreateWebhookURL
@@ -256,6 +333,9 @@ func runPaymentsCreate(cmd *cobra.Command, _ []string) error {
 		}
 		req.Metadata = &meta
 	}
+
+	// --with-lines / --with-billing / --with-shipping: these flags override any
+	// lines / addresses that were seeded from JSON stdin.
 	if payCreateWithLines {
 		lines, err := buildPaymentLines(payCreateCurrency, payCreateAmount, payCreateDescription, payCreateLinesVatRate, payCreateLinesShipping)
 		if err != nil {
@@ -379,7 +459,27 @@ func runPaymentsGet(_ *cobra.Command, args []string) error {
 	return nil
 }
 
-func runPaymentsUpdate(_ *cobra.Command, args []string) error {
+func runPaymentsUpdate(cmd *cobra.Command, args []string) error {
+	// ── JSON stdin input ─────────────────────────────────────────────────────
+	jsonInput, err := input.ReadStdin()
+	if err != nil {
+		return err
+	}
+	if jsonInput != nil {
+		if v, ok := input.Str(jsonInput, "description"); ok && !cmd.Flags().Changed("description") {
+			payUpdateDescription = v
+		}
+		if v, ok := input.Str(jsonInput, "redirectUrl"); ok && !cmd.Flags().Changed("redirect-url") {
+			payUpdateRedirectURL = v
+		}
+		if v, ok := input.Str(jsonInput, "webhookUrl"); ok && !cmd.Flags().Changed("webhook-url") {
+			payUpdateWebhookURL = v
+		}
+		if v, ok := input.RawJSON(jsonInput, "metadata"); ok && !cmd.Flags().Changed("metadata") {
+			payUpdateMetadata = v
+		}
+	}
+
 	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile)
 	if err != nil {
 		return err
@@ -763,4 +863,167 @@ func parseMetadata(raw string) (components.Metadata, error) {
 		return components.Metadata{}, fmt.Errorf("must be a valid JSON value: %w", err)
 	}
 	return components.CreateMetadataStr(raw), nil
+}
+
+// seedPassThroughFields copies non-flag-mapped fields from the raw stdin JSON
+// map onto req.  Each field is extracted individually so that a type mismatch
+// in one field (e.g. vatRate given as a JSON number rather than a quoted
+// string) cannot silently prevent other fields — most notably billingAddress —
+// from being forwarded.
+//
+// Fields that have a direct CLI flag (amount, currency, description,
+// redirectUrl, webhookUrl, method, sequenceType, captureMode, locale,
+// metadata, customerId) are applied separately by the caller and are not
+// touched here.
+func seedPassThroughFields(req *components.PaymentRequest, m map[string]json.RawMessage) {
+	// ── Addresses ────────────────────────────────────────────────────────────
+	if raw, ok := m["billingAddress"]; ok {
+		var ba components.PaymentRequestBillingAddress
+		if err := json.Unmarshal(raw, &ba); err == nil {
+			req.BillingAddress = &ba
+		}
+	}
+	if raw, ok := m["shippingAddress"]; ok {
+		var sa components.PaymentAddress
+		if err := json.Unmarshal(raw, &sa); err == nil {
+			req.ShippingAddress = &sa
+		}
+	}
+
+	// ── Order lines ──────────────────────────────────────────────────────────
+	if raw, ok := m["lines"]; ok {
+		// Callers sometimes send vatRate as a bare JSON number (e.g. 0) instead
+		// of the quoted decimal string that PaymentRequestLine.VatRate (*string)
+		// requires.  Normalise before deserialising.
+		if normalized, err := normalizeLineVatRates(raw); err == nil {
+			var lines []components.PaymentRequestLine
+			if err := json.Unmarshal(normalized, &lines); err == nil {
+				req.Lines = lines
+			}
+		}
+	}
+
+	// ── Simple string pass-throughs ──────────────────────────────────────────
+	strField := func(raw json.RawMessage, dst **string) {
+		var v string
+		if err := json.Unmarshal(raw, &v); err == nil {
+			*dst = &v
+		}
+	}
+	if raw, ok := m["cancelUrl"]; ok {
+		strField(raw, &req.CancelURL)
+	}
+	if raw, ok := m["issuer"]; ok {
+		strField(raw, &req.Issuer)
+	}
+	if raw, ok := m["restrictPaymentMethodsToCountry"]; ok {
+		strField(raw, &req.RestrictPaymentMethodsToCountry)
+	}
+	if raw, ok := m["captureDelay"]; ok {
+		strField(raw, &req.CaptureDelay)
+	}
+	if raw, ok := m["mandateId"]; ok {
+		strField(raw, &req.MandateID)
+	}
+	if raw, ok := m["profileId"]; ok {
+		strField(raw, &req.ProfileID)
+	}
+	if raw, ok := m["dueDate"]; ok {
+		strField(raw, &req.DueDate)
+	}
+	if raw, ok := m["applePayPaymentToken"]; ok {
+		strField(raw, &req.ApplePayPaymentToken)
+	}
+	if raw, ok := m["cardToken"]; ok {
+		strField(raw, &req.CardToken)
+	}
+	if raw, ok := m["voucherNumber"]; ok {
+		strField(raw, &req.VoucherNumber)
+	}
+	if raw, ok := m["voucherPin"]; ok {
+		strField(raw, &req.VoucherPin)
+	}
+	if raw, ok := m["sessionId"]; ok {
+		strField(raw, &req.SessionID)
+	}
+	if raw, ok := m["customerReference"]; ok {
+		strField(raw, &req.CustomerReference)
+	}
+	if raw, ok := m["terminalId"]; ok {
+		strField(raw, &req.TerminalID)
+	}
+
+	// ── Bool pass-throughs ───────────────────────────────────────────────────
+	boolField := func(raw json.RawMessage, dst **bool) {
+		var v bool
+		if err := json.Unmarshal(raw, &v); err == nil {
+			*dst = &v
+		}
+	}
+	if raw, ok := m["testmode"]; ok {
+		boolField(raw, &req.Testmode)
+	}
+	if raw, ok := m["digitalGoods"]; ok {
+		boolField(raw, &req.DigitalGoods)
+	}
+
+	// ── Structured pass-throughs ─────────────────────────────────────────────
+	if raw, ok := m["company"]; ok {
+		var v components.Company
+		if err := json.Unmarshal(raw, &v); err == nil {
+			req.Company = &v
+		}
+	}
+	if raw, ok := m["applicationFee"]; ok {
+		var v components.PaymentRequestApplicationFee
+		if err := json.Unmarshal(raw, &v); err == nil {
+			req.ApplicationFee = &v
+		}
+	}
+	if raw, ok := m["routing"]; ok {
+		var v []components.EntityPaymentRoute
+		if err := json.Unmarshal(raw, &v); err == nil {
+			req.Routing = v
+		}
+	}
+	if raw, ok := m["extraMerchantData"]; ok {
+		var v map[string]any
+		if err := json.Unmarshal(raw, &v); err == nil {
+			req.ExtraMerchantData = v
+		}
+	}
+}
+
+// normalizeLineVatRates rewrites any vatRate that is a bare JSON number (e.g.
+// 0 or 21) into a quoted decimal string (e.g. "0.00" or "21.00") so the value
+// can be unmarshaled into PaymentRequestLine.VatRate (*string).  The raw
+// json.RawMessage is returned unchanged when it cannot be parsed as an array
+// of objects.
+func normalizeLineVatRates(raw json.RawMessage) (json.RawMessage, error) {
+	var lines []map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &lines); err != nil {
+		return raw, err
+	}
+	changed := false
+	for _, line := range lines {
+		vr, ok := line["vatRate"]
+		if !ok {
+			continue
+		}
+		var num float64
+		if err := json.Unmarshal(vr, &num); err != nil {
+			// Not a bare number — already a string or missing; leave it.
+			continue
+		}
+		quoted, err := json.Marshal(fmt.Sprintf("%.2f", num))
+		if err != nil {
+			continue
+		}
+		line["vatRate"] = quoted
+		changed = true
+	}
+	if !changed {
+		return raw, nil
+	}
+	return json.Marshal(lines)
 }

@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/charmbracelet/huh"
+	"github.com/fjbender/mollie-cli/internal/input"
 	"github.com/fjbender/mollie-cli/internal/mollieclient"
 	"github.com/fjbender/mollie-cli/internal/output"
 	"github.com/fjbender/mollie-cli/internal/prompt"
@@ -136,10 +137,8 @@ func init() {
 	customersPaymentsCreateCmd.Flags().StringVar(&custPayCreateSequenceType, "sequence-type", "", "Sequence type: oneoff, first, or recurring")
 	customersPaymentsCreateCmd.Flags().StringVar(&custPayCreateWebhookURL, "webhook-url", "", "Webhook URL for payment status updates")
 	customersPaymentsCreateCmd.Flags().StringVar(&custPayCreateMetadata, "metadata", "", "Arbitrary JSON metadata to attach to the payment")
-	customersPaymentsCreateCmd.MarkFlagRequired("amount")       //nolint:errcheck
-	customersPaymentsCreateCmd.MarkFlagRequired("currency")     //nolint:errcheck
-	customersPaymentsCreateCmd.MarkFlagRequired("description")  //nolint:errcheck
-	customersPaymentsCreateCmd.MarkFlagRequired("redirect-url") //nolint:errcheck
+	// Required fields are validated in runCustomersPaymentsCreate so that JSON
+	// stdin can supply them without triggering Cobra's pre-RunE flag validation.
 
 	// customer payments list
 	customersPaymentsListCmd.Flags().Int64Var(&custPayListLimit, "limit", 50, "Maximum number of results to return")
@@ -160,7 +159,24 @@ func init() {
 
 // ── handlers ───────────────────────────────────────────────────────────────────────────────────
 
-func runCustomersCreate(_ *cobra.Command, _ []string) error {
+func runCustomersCreate(cmd *cobra.Command, _ []string) error {
+	// ── JSON stdin input ─────────────────────────────────────────────────────
+	jsonInput, err := input.ReadStdin()
+	if err != nil {
+		return err
+	}
+	if jsonInput != nil {
+		if v, ok := input.Str(jsonInput, "name"); ok && !cmd.Flags().Changed("name") {
+			custName = v
+		}
+		if v, ok := input.Str(jsonInput, "email"); ok && !cmd.Flags().Changed("email") {
+			custEmail = v
+		}
+		if v, ok := input.RawJSON(jsonInput, "metadata"); ok && !cmd.Flags().Changed("metadata") {
+			custMetadata = v
+		}
+	}
+
 	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile)
 	if err != nil {
 		return err
@@ -295,7 +311,24 @@ func runCustomersGet(_ *cobra.Command, args []string) error {
 	return nil
 }
 
-func runCustomersUpdate(_ *cobra.Command, args []string) error {
+func runCustomersUpdate(cmd *cobra.Command, args []string) error {
+	// ── JSON stdin input ─────────────────────────────────────────────────────
+	jsonInput, err := input.ReadStdin()
+	if err != nil {
+		return err
+	}
+	if jsonInput != nil {
+		if v, ok := input.Str(jsonInput, "name"); ok && !cmd.Flags().Changed("name") {
+			custUpdateName = v
+		}
+		if v, ok := input.Str(jsonInput, "email"); ok && !cmd.Flags().Changed("email") {
+			custUpdateEmail = v
+		}
+		if v, ok := input.RawJSON(jsonInput, "metadata"); ok && !cmd.Flags().Changed("metadata") {
+			custUpdateMetadata = v
+		}
+	}
+
 	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile)
 	if err != nil {
 		return err
@@ -361,8 +394,54 @@ func runCustomersDelete(_ *cobra.Command, args []string) error {
 	return nil
 }
 
-func runCustomersPaymentsCreate(_ *cobra.Command, args []string) error {
+func runCustomersPaymentsCreate(cmd *cobra.Command, args []string) error {
 	customerID := args[0]
+
+	// ── JSON stdin input ─────────────────────────────────────────────────────
+	jsonInput, err := input.ReadStdin()
+	if err != nil {
+		return err
+	}
+	if jsonInput != nil {
+		if v, ok := input.Str(jsonInput, "description"); ok && !cmd.Flags().Changed("description") {
+			custPayCreateDescription = v
+		}
+		if val, cur, ok := input.Amount(jsonInput, "amount"); ok {
+			if !cmd.Flags().Changed("amount") {
+				custPayCreateAmount = val
+			}
+			if !cmd.Flags().Changed("currency") {
+				custPayCreateCurrency = cur
+			}
+		}
+		if v, ok := input.Str(jsonInput, "redirectUrl"); ok && !cmd.Flags().Changed("redirect-url") {
+			custPayCreateRedirectURL = v
+		}
+		if v, ok := input.Str(jsonInput, "webhookUrl"); ok && !cmd.Flags().Changed("webhook-url") {
+			custPayCreateWebhookURL = v
+		}
+		if v, ok := input.Str(jsonInput, "method"); ok && !cmd.Flags().Changed("method") {
+			custPayCreateMethod = v
+		}
+		if v, ok := input.Str(jsonInput, "sequenceType"); ok && !cmd.Flags().Changed("sequence-type") {
+			custPayCreateSequenceType = v
+		}
+		if v, ok := input.RawJSON(jsonInput, "metadata"); ok && !cmd.Flags().Changed("metadata") {
+			custPayCreateMetadata = v
+		}
+	}
+
+	// Validate required fields (may have been supplied via JSON stdin).
+	switch {
+	case custPayCreateAmount == "":
+		return fmt.Errorf("required flag \"amount\" not set")
+	case custPayCreateCurrency == "":
+		return fmt.Errorf("required flag \"currency\" not set")
+	case custPayCreateDescription == "":
+		return fmt.Errorf("required flag \"description\" not set")
+	case custPayCreateRedirectURL == "":
+		return fmt.Errorf("required flag \"redirect-url\" not set")
+	}
 
 	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile)
 	if err != nil {

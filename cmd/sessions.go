@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strconv"
 
+	"github.com/fjbender/mollie-cli/internal/input"
 	"github.com/fjbender/mollie-cli/internal/mollieclient"
 	"github.com/fjbender/mollie-cli/internal/output"
 	"github.com/mollie/mollie-api-golang/models/components"
@@ -135,6 +136,40 @@ func init() {
 // ── handlers ─────────────────────────────────────────────────────────────────
 
 func runSessionsCreate(cmd *cobra.Command, _ []string) error {
+	// ── JSON stdin input ─────────────────────────────────────────────────────
+	jsonInput, err := input.ReadStdin()
+	if err != nil {
+		return err
+	}
+	if jsonInput != nil {
+		if v, ok := input.Str(jsonInput, "description"); ok && !cmd.Flags().Changed("description") {
+			sessCreateDescription = v
+		}
+		if val, cur, ok := input.Amount(jsonInput, "amount"); ok {
+			if !cmd.Flags().Changed("amount") {
+				sessCreateAmount = val
+			}
+			if !cmd.Flags().Changed("currency") {
+				sessCreateCurrency = cur
+			}
+		}
+		if v, ok := input.Str(jsonInput, "redirectUrl"); ok && !cmd.Flags().Changed("redirect-url") {
+			sessCreateRedirectURL = v
+		}
+		if v, ok := input.Str(jsonInput, "webhookUrl"); ok && !cmd.Flags().Changed("webhook-url") {
+			sessCreateWebhookURL = v
+		}
+		if v, ok := input.Str(jsonInput, "customerId"); ok && !cmd.Flags().Changed("customer-id") {
+			sessCreateCustomerID = v
+		}
+		if v, ok := input.Str(jsonInput, "sequenceType"); ok && !cmd.Flags().Changed("sequence-type") {
+			sessCreateSequenceType = v
+		}
+		if v, ok := input.RawJSON(jsonInput, "metadata"); ok && !cmd.Flags().Changed("metadata") {
+			sessCreateMetadata = v
+		}
+	}
+
 	applyCreateDefaults(cmd,
 		&sessCreateDescription, &sessCreateAmount, &sessCreateCurrency,
 		&sessCreateRedirectURL, &sessCreateWebhookURL,

@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/charmbracelet/huh"
+	"github.com/fjbender/mollie-cli/internal/input"
 	"github.com/fjbender/mollie-cli/internal/mollieclient"
 	"github.com/fjbender/mollie-cli/internal/output"
 	"github.com/fjbender/mollie-cli/internal/prompt"
@@ -127,6 +128,37 @@ func init() {
 // ── handlers ─────────────────────────────────────────────────────────────────
 
 func runPaymentLinksCreate(cmd *cobra.Command, _ []string) error {
+	// ── JSON stdin input ─────────────────────────────────────────────────────
+	jsonInput, err := input.ReadStdin()
+	if err != nil {
+		return err
+	}
+	if jsonInput != nil {
+		if v, ok := input.Str(jsonInput, "description"); ok && !cmd.Flags().Changed("description") {
+			plCreateDescription = v
+		}
+		if val, cur, ok := input.Amount(jsonInput, "amount"); ok {
+			if !cmd.Flags().Changed("amount") {
+				plCreateAmount = val
+			}
+			if !cmd.Flags().Changed("currency") {
+				plCreateCurrency = cur
+			}
+		}
+		if v, ok := input.Str(jsonInput, "redirectUrl"); ok && !cmd.Flags().Changed("redirect-url") {
+			plCreateRedirectURL = v
+		}
+		if v, ok := input.Str(jsonInput, "webhookUrl"); ok && !cmd.Flags().Changed("webhook-url") {
+			plCreateWebhookURL = v
+		}
+		if v, ok := input.Bool(jsonInput, "reusable"); ok && !cmd.Flags().Changed("reusable") {
+			plCreateReusable = v
+		}
+		if v, ok := input.Str(jsonInput, "expiresAt"); ok && !cmd.Flags().Changed("expires-at") {
+			plCreateExpiresAt = v
+		}
+	}
+
 	applyCreateDefaults(cmd,
 		&plCreateDescription, &plCreateAmount, &plCreateCurrency,
 		&plCreateRedirectURL, &plCreateWebhookURL,
@@ -270,6 +302,20 @@ func runPaymentLinksGet(_ *cobra.Command, args []string) error {
 }
 
 func runPaymentLinksUpdate(cmd *cobra.Command, args []string) error {
+	// ── JSON stdin input ─────────────────────────────────────────────────────
+	jsonInput, err := input.ReadStdin()
+	if err != nil {
+		return err
+	}
+	if jsonInput != nil {
+		if v, ok := input.Str(jsonInput, "description"); ok && !cmd.Flags().Changed("description") {
+			plUpdateDescription = v
+		}
+		if v, ok := input.Bool(jsonInput, "archived"); ok && !cmd.Flags().Changed("archived") {
+			plUpdateArchived = v
+		}
+	}
+
 	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile)
 	if err != nil {
 		return err
