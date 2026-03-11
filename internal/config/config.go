@@ -68,16 +68,16 @@ func IsLiveAPIKey(key string) bool {
 	return strings.HasPrefix(key, "live_")
 }
 
-// ConfigFile is the complete on-disk representation of the config file,
+// File is the complete on-disk representation of the config file,
 // containing all named environments and the active-environment pointer.
-type ConfigFile struct {
+type File struct {
 	ActiveEnvironment string             `toml:"active_environment"`
 	Environments      map[string]*Config `toml:"environments"`
 }
 
 // ActiveEnvName returns the effective environment name: the process-level
 // override set via SetCurrentEnv(), or the file's active_environment field.
-func (f *ConfigFile) ActiveEnvName() string {
+func (f *File) ActiveEnvName() string {
 	if currentEnvOverride != "" {
 		return currentEnvOverride
 	}
@@ -86,7 +86,7 @@ func (f *ConfigFile) ActiveEnvName() string {
 
 // ActiveConfig returns the Config for the currently active environment.
 // Never returns nil; falls back to a zero Config with sensible defaults.
-func (f *ConfigFile) ActiveConfig() *Config {
+func (f *File) ActiveConfig() *Config {
 	name := f.ActiveEnvName()
 	if f.Environments != nil {
 		if env, ok := f.Environments[name]; ok {
@@ -117,14 +117,14 @@ func Path() (string, error) {
 	return filepath.Join(dir, "config.toml"), nil
 }
 
-// LoadFile reads the complete config file and returns a *ConfigFile.
+// LoadFile reads the complete config file and returns a *File.
 //
 // Three cases are handled transparently:
-//   - File not found       → brand-new install; returns a ConfigFile with an empty "default" env.
+//   - File not found       → brand-new install; returns a File with an empty "default" env.
 //   - New format           → active_environment key present; parsed directly.
 //   - Legacy flat format   → no active_environment key; top-level keys are wrapped into a
 //     "default" environment and the file is silently re-written in the new format.
-func LoadFile() (*ConfigFile, error) {
+func LoadFile() (*File, error) {
 	path, err := Path()
 	if err != nil {
 		return nil, err
@@ -146,7 +146,7 @@ func LoadFile() (*ConfigFile, error) {
 
 	if _, isNew := probe["active_environment"]; isNew {
 		// ── New multi-environment format ─────────────────────────────────────
-		var f ConfigFile
+		var f File
 		if err := toml.Unmarshal(data, &f); err != nil {
 			return nil, fmt.Errorf("parsing config file: %w", err)
 		}
@@ -161,7 +161,7 @@ func LoadFile() (*ConfigFile, error) {
 	if err := toml.Unmarshal(data, &legacy); err != nil {
 		return nil, fmt.Errorf("parsing config file: %w", err)
 	}
-	f := &ConfigFile{
+	f := &File{
 		ActiveEnvironment: DefaultEnvironmentName,
 		Environments: map[string]*Config{
 			DefaultEnvironmentName: &legacy,
@@ -172,8 +172,8 @@ func LoadFile() (*ConfigFile, error) {
 	return f, nil
 }
 
-// SaveFile writes the complete ConfigFile to disk with mode 0600.
-func SaveFile(f *ConfigFile) error {
+// SaveFile writes the complete File to disk with mode 0600.
+func SaveFile(f *File) error {
 	dir, err := Dir()
 	if err != nil {
 		return err
@@ -242,10 +242,10 @@ func Save(cfg *Config) error {
 	return SaveFile(f)
 }
 
-// newDefaultConfigFile returns a ConfigFile with a single, empty "default"
+// newDefaultConfigFile returns a File with a single, empty "default"
 // environment pre-created, ready to be populated by auth setup.
-func newDefaultConfigFile() *ConfigFile {
-	return &ConfigFile{
+func newDefaultConfigFile() *File {
+	return &File{
 		ActiveEnvironment: DefaultEnvironmentName,
 		Environments: map[string]*Config{
 			DefaultEnvironmentName: {Output: "table"},
