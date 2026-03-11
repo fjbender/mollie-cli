@@ -5,10 +5,10 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/spf13/viper"
+	"github.com/pelletier/go-toml/v2"
 )
 
-// Field key constants — used when reading/writing via Viper.
+// Field key constants — kept for reference by other packages.
 const (
 	KeyAPIKey    = "api_key"
 	KeyProfileID = "profile_id"
@@ -21,26 +21,67 @@ const (
 	KeyDefaultCurrency    = "default_currency"
 	KeyDefaultRedirectURL = "default_redirect_url"
 	KeyDefaultWebhookURL  = "default_webhook_url"
+
+	// DefaultEnvironmentName is the name of the auto-created first environment.
+	DefaultEnvironmentName = "default"
 )
 
-// Config holds all persistent CLI configuration.
+// currentEnvOverride optionally overrides which environment Load() and Save()
+// operate on for the lifetime of the process. Set via SetCurrentEnv().
+var currentEnvOverride string
+
+// SetCurrentEnv makes Load() and Save() target the named environment instead
+// of the file's active_environment pointer. Pass "" to clear the override.
+func SetCurrentEnv(name string) {
+	currentEnvOverride = name
+}
+
+// Config holds all persistent configuration for a single named environment.
 type Config struct {
-	APIKey    string `mapstructure:"api_key"`
-	ProfileID string `mapstructure:"profile_id"`
-	LiveMode  bool   `mapstructure:"live_mode"`
-	Output    string `mapstructure:"output"`
+	APIKey    string `toml:"api_key"    mapstructure:"api_key"`
+	ProfileID string `toml:"profile_id" mapstructure:"profile_id"`
+	LiveMode  bool   `toml:"live_mode"  mapstructure:"live_mode"`
+	Output    string `toml:"output"     mapstructure:"output"`
 
 	// Reusable defaults applied to create commands when the flag is not set.
-	DefaultDescription string `mapstructure:"default_description"`
-	DefaultAmount      string `mapstructure:"default_amount"`
-	DefaultCurrency    string `mapstructure:"default_currency"`
-	DefaultRedirectURL string `mapstructure:"default_redirect_url"`
-	DefaultWebhookURL  string `mapstructure:"default_webhook_url"`
+	DefaultDescription string `toml:"default_description,omitempty" mapstructure:"default_description"`
+	DefaultAmount      string `toml:"default_amount,omitempty"      mapstructure:"default_amount"`
+	DefaultCurrency    string `toml:"default_currency,omitempty"    mapstructure:"default_currency"`
+	DefaultRedirectURL string `toml:"default_redirect_url,omitempty" mapstructure:"default_redirect_url"`
+	DefaultWebhookURL  string `toml:"default_webhook_url,omitempty"  mapstructure:"default_webhook_url"`
 }
 
 // IsConfigured returns true when an API key is present.
 func (c *Config) IsConfigured() bool {
 	return c.APIKey != ""
+}
+
+// ConfigFile is the complete on-disk representation of the config file,
+// containing all named environments and the active-environment pointer.
+type ConfigFile struct {
+	ActiveEnvironment string             `toml:"active_environment"`
+	Environments      map[string]*Config `toml:"environments"`
+}
+
+// ActiveEnvName returns the effective environment name: the process-level
+// override set via SetCurrentEnv(), or the file's active_environment field.
+func (f *ConfigFile) ActiveEnvName() string {
+	if currentEnvOverride != "" {
+		return currentEnvOverride
+	}
+	return f.ActiveEnvironment
+}
+
+// ActiveConfig returns the Config for the currently active environment.
+// Never returns nil; falls back to a zero Config with sensible defaults.
+func (f *ConfigFile) ActiveConfig() *Config {
+	name := f.ActiveEnvName()
+	if f.Environments != nil {
+		if env, ok := f.Environments[name]; ok {
+			return env
+		}
+	}
+	return &Config{Output: "table"}
 }
 
 // Dir returns the directory that holds the config file, respecting XDG.
@@ -64,44 +105,63 @@ func Path() (string, error) {
 	return filepath.Join(dir, "config.toml"), nil
 }
 
-// Load reads the config file (if present) and returns the resolved Config.
-// Missing file is not an error — it simply yields an empty Config.
-func Load() (*Config, error) {
-	v := viper.New()
-	v.SetConfigType("toml")
-	v.SetConfigName("config")
-
-	// Defaults
-	v.SetDefault(KeyOutput, "table")
-	v.SetDefault(KeyLiveMode, false)
-
-	// Environment variable overrides
-	v.SetEnvPrefix("MOLLIE")
-	v.AutomaticEnv()
-	v.BindEnv(KeyAPIKey, "MOLLIE_API_KEY")     //nolint:errcheck
-	v.BindEnv(KeyLiveMode, "MOLLIE_LIVE_MODE") //nolint:errcheck
-
-	dir, err := Dir()
+// LoadFile reads the complete config file and returns a *ConfigFile.
+//
+// Three cases are handled transparently:
+//   - File not found       → brand-new install; returns a ConfigFile with an empty "default" env.
+//   - New format           → active_environment key present; parsed directly.
+//   - Legacy flat format   → no active_environment key; top-level keys are wrapped into a
+//     "default" environment and the file is silently re-written in the new format.
+func LoadFile() (*ConfigFile, error) {
+	path, err := Path()
 	if err != nil {
 		return nil, err
 	}
-	v.AddConfigPath(dir)
 
-	if err := v.ReadInConfig(); err != nil {
-		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
-			return nil, fmt.Errorf("reading config file: %w", err)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return newDefaultConfigFile(), nil
 		}
+		return nil, fmt.Errorf("reading config file: %w", err)
 	}
 
-	var cfg Config
-	if err := v.Unmarshal(&cfg); err != nil {
-		return nil, fmt.Errorf("parsing config: %w", err)
+	// Probe the raw map to detect which format the file uses.
+	var probe map[string]any
+	if err := toml.Unmarshal(data, &probe); err != nil {
+		return nil, fmt.Errorf("parsing config file: %w", err)
 	}
-	return &cfg, nil
+
+	if _, isNew := probe["active_environment"]; isNew {
+		// ── New multi-environment format ─────────────────────────────────────
+		var f ConfigFile
+		if err := toml.Unmarshal(data, &f); err != nil {
+			return nil, fmt.Errorf("parsing config file: %w", err)
+		}
+		if f.Environments == nil {
+			f.Environments = map[string]*Config{}
+		}
+		return &f, nil
+	}
+
+	// ── Legacy flat format — migrate automatically ───────────────────────────
+	var legacy Config
+	if err := toml.Unmarshal(data, &legacy); err != nil {
+		return nil, fmt.Errorf("parsing config file: %w", err)
+	}
+	f := &ConfigFile{
+		ActiveEnvironment: DefaultEnvironmentName,
+		Environments: map[string]*Config{
+			DefaultEnvironmentName: &legacy,
+		},
+	}
+	// Silently persist the migrated format; a failure here is non-fatal.
+	_ = SaveFile(f)
+	return f, nil
 }
 
-// Save writes cfg to disk at the canonical path with mode 0600.
-func Save(cfg *Config) error {
+// SaveFile writes the complete ConfigFile to disk with mode 0600.
+func SaveFile(f *ConfigFile) error {
 	dir, err := Dir()
 	if err != nil {
 		return err
@@ -115,21 +175,68 @@ func Save(cfg *Config) error {
 		return err
 	}
 
-	v := viper.New()
-	v.SetConfigType("toml")
-	v.Set(KeyAPIKey, cfg.APIKey)
-	v.Set(KeyProfileID, cfg.ProfileID)
-	v.Set(KeyLiveMode, cfg.LiveMode)
-	v.Set(KeyOutput, cfg.Output)
-	v.Set(KeyDefaultDescription, cfg.DefaultDescription)
-	v.Set(KeyDefaultAmount, cfg.DefaultAmount)
-	v.Set(KeyDefaultCurrency, cfg.DefaultCurrency)
-	v.Set(KeyDefaultRedirectURL, cfg.DefaultRedirectURL)
-	v.Set(KeyDefaultWebhookURL, cfg.DefaultWebhookURL)
+	data, err := toml.Marshal(f)
+	if err != nil {
+		return fmt.Errorf("serializing config: %w", err)
+	}
 
-	if err := v.WriteConfigAs(path); err != nil {
+	if err := os.WriteFile(path, data, 0600); err != nil {
 		return fmt.Errorf("writing config file: %w", err)
 	}
-	// Restrict permissions to owner read/write only.
-	return os.Chmod(path, 0600)
+	return nil
+}
+
+// Load returns the Config for the currently active environment (or the override
+// set via SetCurrentEnv), with environment-variable overrides applied.
+// This is the primary read function used by most commands.
+func Load() (*Config, error) {
+	f, err := LoadFile()
+	if err != nil {
+		return nil, err
+	}
+
+	cfg := f.ActiveConfig()
+
+	// Apply environment-variable overrides (higher priority than file).
+	if key := os.Getenv("MOLLIE_API_KEY"); key != "" {
+		cfg.APIKey = key
+	}
+	if os.Getenv("MOLLIE_LIVE_MODE") == "true" {
+		cfg.LiveMode = true
+	}
+	if cfg.Output == "" {
+		cfg.Output = "table"
+	}
+
+	return cfg, nil
+}
+
+// Save persists cfg as the configuration for the currently active environment
+// (or the override set via SetCurrentEnv).
+// This is the primary write function used by most commands.
+func Save(cfg *Config) error {
+	f, err := LoadFile()
+	if err != nil {
+		// If the file couldn't be read at all, start from a clean slate.
+		f = newDefaultConfigFile()
+	}
+
+	name := f.ActiveEnvName()
+	if f.Environments == nil {
+		f.Environments = map[string]*Config{}
+	}
+	f.Environments[name] = cfg
+
+	return SaveFile(f)
+}
+
+// newDefaultConfigFile returns a ConfigFile with a single, empty "default"
+// environment pre-created, ready to be populated by auth setup.
+func newDefaultConfigFile() *ConfigFile {
+	return &ConfigFile{
+		ActiveEnvironment: DefaultEnvironmentName,
+		Environments: map[string]*Config{
+			DefaultEnvironmentName: {Output: "table"},
+		},
+	}
 }

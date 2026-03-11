@@ -53,6 +53,11 @@ func init() {
 
 // runAuthSetup implements the interactive first-run setup flow.
 func runAuthSetup(_ *cobra.Command, _ []string) error {
+	// Show which environment is being configured.
+	if f, err := config.LoadFile(); err == nil {
+		fmt.Printf("Configuring environment: %s\n", f.ActiveEnvName())
+	}
+
 	apiKey, err := prompt.APIKey()
 	if err != nil {
 		if errors.Is(err, huh.ErrUserAborted) {
@@ -147,6 +152,7 @@ func selectProfileInteractively(client *mollieapi.Client) (string, error) {
 
 // runAuthStatus displays the current auth / config state.
 func runAuthStatus(_ *cobra.Command, _ []string) error {
+	f, ferr := config.LoadFile()
 	c, err := config.Load()
 	if err != nil {
 		return fmt.Errorf("loading config: %w", err)
@@ -157,6 +163,11 @@ func runAuthStatus(_ *cobra.Command, _ []string) error {
 		os.Exit(1)
 	}
 
+	envName := config.DefaultEnvironmentName
+	if ferr == nil {
+		envName = f.ActiveEnvName()
+	}
+
 	liveModeStr := "false (test mode is active)"
 	if c.LiveMode {
 		liveModeStr = "true"
@@ -165,6 +176,7 @@ func runAuthStatus(_ *cobra.Command, _ []string) error {
 	output.PrintTable(
 		[]string{"FIELD", "VALUE"},
 		[][]string{
+			{"Environment", envName},
 			{"API Key", maskAPIKey(c.APIKey)},
 			{"Profile ID", dash(c.ProfileID)},
 			{"Live Mode", liveModeStr},
@@ -175,14 +187,24 @@ func runAuthStatus(_ *cobra.Command, _ []string) error {
 	return nil
 }
 
-// runAuthClear removes the config file after an interactive confirmation.
+// runAuthClear wipes the API key and profile ID for the active environment.
+// It does not delete the environment or touch any other settings.
 func runAuthClear(_ *cobra.Command, _ []string) error {
-	cfgPath, err := config.Path()
+	f, err := config.LoadFile()
 	if err != nil {
-		return err
+		return fmt.Errorf("loading config: %w", err)
 	}
 
-	confirmed, err := prompt.Confirm(fmt.Sprintf("Remove stored credentials from %s?", cfgPath))
+	envName := f.ActiveEnvName()
+	env, exists := f.Environments[envName]
+	if !exists || !env.IsConfigured() {
+		fmt.Printf("Environment %q has no stored credentials.\n", envName)
+		return nil
+	}
+
+	confirmed, err := prompt.Confirm(
+		fmt.Sprintf("Clear API key and profile ID for environment %q?", envName),
+	)
 	if err != nil {
 		if errors.Is(err, huh.ErrUserAborted) {
 			fmt.Println("Cancelled.")
@@ -195,11 +217,15 @@ func runAuthClear(_ *cobra.Command, _ []string) error {
 		return nil
 	}
 
-	if err := os.Remove(cfgPath); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("removing config file: %w", err)
+	env.APIKey = ""
+	env.ProfileID = ""
+
+	if err := config.SaveFile(f); err != nil {
+		return fmt.Errorf("saving config: %w", err)
 	}
 
-	fmt.Printf("✓ Credentials cleared (%s removed)\n", cfgPath)
+	fmt.Printf("✓ Credentials cleared for environment %q.\n", envName)
+	fmt.Printf("  Run `mollie auth setup` to reconfigure, or `mollie env delete %s` to remove the environment.\n", envName)
 	return nil
 }
 

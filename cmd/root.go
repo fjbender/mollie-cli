@@ -17,6 +17,7 @@ var (
 	flagProfile string
 	flagAPIKey  string
 	flagNoColor bool
+	flagEnv     string // selects a config environment for this invocation
 )
 
 // cfg holds the loaded configuration for the current invocation.
@@ -45,9 +46,15 @@ All commands run in test mode by default. Pass --live to operate on live data.`,
 			flagLive = true
 		}
 
-		// auth subcommands manage credentials themselves and don't need a
-		// pre-configured API key to run.
-		if isAuthCommand(cmd) {
+		// Apply --env override globally so that config.Load()/Save() in every
+		// command — including auth and env subcommands — target the right env.
+		if flagEnv != "" {
+			config.SetCurrentEnv(flagEnv)
+		}
+
+		// auth and env subcommands manage configuration themselves and don't
+		// require a pre-configured API key to run.
+		if isAuthCommand(cmd) || isEnvCommand(cmd) {
 			return nil
 		}
 
@@ -91,6 +98,10 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(
 		&flagNoColor, "no-color", false,
 		"Disable ANSI color output",
+	)
+	rootCmd.PersistentFlags().StringVarP(
+		&flagEnv, "env", "e", "",
+		"Use a specific config environment for this invocation (overrides active environment)",
 	)
 }
 
