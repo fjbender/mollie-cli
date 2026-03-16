@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"strconv"
 
 	"github.com/fjbender/mollie-cli/internal/input"
@@ -28,6 +29,7 @@ var (
 
 	// --with-lines flags
 	sessCreateWithLines     bool
+	sessCreateWithDiscount  bool
 	sessCreateLinesVatRate  string
 	sessCreateLinesShipping string
 
@@ -96,9 +98,10 @@ func init() {
 	sessionsCreateCmd.Flags().StringVar(&sessCreateMetadata, "metadata", "", "Arbitrary JSON object metadata to attach to the session")
 
 	// --with-lines flags
-	sessionsCreateCmd.Flags().BoolVar(&sessCreateWithLines, "with-lines", false, "Auto-generate order lines summing to --amount")
-	sessionsCreateCmd.Flags().StringVar(&sessCreateLinesVatRate, "lines-vat-rate", "0.00", "VAT rate for generated lines, e.g. 21.00 (default 0.00)")
-	sessionsCreateCmd.Flags().StringVar(&sessCreateLinesShipping, "lines-shipping-amount", "", "Split a shipping line off the total (e.g. 4.99); must be smaller than --amount")
+	sessionsCreateCmd.Flags().BoolVar(&sessCreateWithLines, "with-lines", false, "Auto-generate order lines summing to --amount (always 2 item lines + 1 shipping line)")
+	sessionsCreateCmd.Flags().BoolVar(&sessCreateWithDiscount, "with-discount", false, "Add a discount line; requires --with-lines")
+	sessionsCreateCmd.Flags().StringVar(&sessCreateLinesVatRate, "lines-vat-rate", "21.00", "VAT rate for generated lines, e.g. 21.00 (default 21.00)")
+	sessionsCreateCmd.Flags().StringVar(&sessCreateLinesShipping, "lines-shipping-amount", "", "Shipping line amount (e.g. 4.99); defaults to 4.99 when omitted; must be smaller than --amount")
 
 	// --with-billing flags
 	sessionsCreateCmd.Flags().BoolVar(&sessCreateWithBilling, "with-billing", false, "Add a default billing address (NL test address); override individual fields with --billing-* flags")
@@ -219,10 +222,14 @@ func runSessionsCreate(cmd *cobra.Command, _ []string) error {
 		}
 		req.Metadata = meta
 	}
+	if sessCreateWithDiscount && !sessCreateWithLines {
+		return fmt.Errorf("--with-discount requires --with-lines")
+	}
 	if sessCreateWithLines {
 		lines, err := buildSessionLines(
 			sessCreateCurrency, sessCreateAmount,
 			sessCreateDescription, sessCreateLinesVatRate, sessCreateLinesShipping,
+			sessCreateWithDiscount,
 		)
 		if err != nil {
 			return err
@@ -395,51 +402,81 @@ func buildSessionShippingAddress() *components.PaymentAddress {
 	return addr
 }
 
-// buildSessionLines auto-generates []SessionLineItem values that sum to the
-// session's total amount. It mirrors buildPaymentLines but uses the
+// buildSessionLines auto-generates []SessionLineItem values that always sum to
+// the session's total amount. It mirrors buildPaymentLines but uses the
 // SessionLineItem type (which takes PaymentLineTypeResponse for its Type field).
 //
-// Parameters:
-//   - currency:    ISO 4217 code, e.g. "EUR"
-//   - totalStr:    session amount string, e.g. "15.00"
-//   - description: used as the description for the product line
-//   - vatRateStr:  VAT rate, e.g. "21.00" ("0.00" → no VAT)
-//   - shippingStr: when non-empty, a shipping line is split off the total;
-//     must be less than totalStr
+// The result always contains:
+//   - 2 physical item lines (description / "Accessories"), split ~60/40
+//   - 1 shipping_fee line (4.99 by default, or --lines-shipping-amount)
+//   - 1 discount line (≈10% off items) when withDiscount is true
 func buildSessionLines(
-	currency, totalStr, description, vatRateStr, shippingStr string,
+	currency, totalStr, description, vatRateStr, shippingStr string, withDiscount bool,
 ) ([]components.SessionLineItem, error) {
-	total, err := strconv.ParseFloat(totalStr, 64)
+	totalFloat, err := strconv.ParseFloat(totalStr, 64)
 	if err != nil {
 		return nil, fmt.Errorf("cannot parse --amount %q: %w", totalStr, err)
 	}
+	totalCents := int64(math.Round(totalFloat * 100))
+
 	vatRate, err := strconv.ParseFloat(vatRateStr, 64)
 	if err != nil {
 		return nil, fmt.Errorf("cannot parse --lines-vat-rate %q: %w", vatRateStr, err)
 	}
-	shipping := 0.0
+
+	// Resolve shipping: use the user-supplied amount, or default to 4.99.
+	var shippingCents int64
 	if shippingStr != "" {
-		shipping, err = strconv.ParseFloat(shippingStr, 64)
+		shippingFloat, err := strconv.ParseFloat(shippingStr, 64)
 		if err != nil {
 			return nil, fmt.Errorf("cannot parse --lines-shipping-amount %q: %w", shippingStr, err)
 		}
-		if shipping <= 0 {
+		shippingCents = int64(math.Round(shippingFloat * 100))
+		if shippingCents <= 0 {
 			return nil, fmt.Errorf("--lines-shipping-amount must be > 0")
 		}
-		if shipping >= total {
+		if shippingCents >= totalCents {
 			return nil, fmt.Errorf("--lines-shipping-amount (%s) must be less than --amount (%s)", shippingStr, totalStr)
+		}
+	} else {
+		// Default shipping: 4.99, capped to at most half the total.
+		shippingCents = 499
+		if shippingCents >= totalCents {
+			shippingCents = totalCents / 2
+		}
+		if shippingCents <= 0 {
+			return nil, fmt.Errorf("--amount is too small to generate lines with a shipping line")
 		}
 	}
 
-	amountOf := func(v float64) components.Amount {
-		return components.Amount{Currency: currency, Value: fmt.Sprintf("%.2f", v)}
+	productNetCents := totalCents - shippingCents
+
+	// When a discount is requested, inflate the gross item prices so that the
+	// discount line brings the net back to productNetCents.
+	// gross = ceil(net / 0.9) using integer arithmetic; discount = gross - net.
+	var productGrossCents, discountCents int64
+	if withDiscount {
+		productGrossCents = (productNetCents*10 + 8) / 9
+		discountCents = productGrossCents - productNetCents
+	} else {
+		productGrossCents = productNetCents
 	}
 
-	vatAmountOf := func(lineTotal float64) *components.Amount {
+	// Split product gross ~60/40 between two item lines.
+	item1Cents := productGrossCents * 6 / 10
+	item2Cents := productGrossCents - item1Cents
+
+	// amountOf converts an integer cent value to a components.Amount.
+	amountOf := func(cents int64) components.Amount {
+		return components.Amount{Currency: currency, Value: fmt.Sprintf("%.2f", float64(cents)/100)}
+	}
+
+	// vatAmountOf computes the VAT embedded in a (possibly negative) cent value.
+	vatAmountOf := func(cents int64) *components.Amount {
 		if vatRate == 0 {
 			return nil
 		}
-		v := lineTotal * vatRate / (100 + vatRate)
+		v := int64(math.Round(float64(cents) * vatRate / (100 + vatRate)))
 		a := amountOf(v)
 		return &a
 	}
@@ -451,35 +488,53 @@ func buildSessionLines(
 	}
 
 	physType := components.PaymentLineTypeResponsePhysical
+	shippingType := components.PaymentLineTypeResponseShippingFee
 	quantity := int64(1)
 
-	productTotal := total - shipping
-	productLine := components.SessionLineItem{
-		Type:        &physType,
-		Description: description,
-		Quantity:    quantity,
-		UnitPrice:   amountOf(productTotal),
-		TotalAmount: amountOf(productTotal),
-		VatRate:     vatRateStrPtr,
-		VatAmount:   vatAmountOf(productTotal),
+	lines := []components.SessionLineItem{
+		{
+			Type:        &physType,
+			Description: description,
+			Quantity:    quantity,
+			UnitPrice:   amountOf(item1Cents),
+			TotalAmount: amountOf(item1Cents),
+			VatRate:     vatRateStrPtr,
+			VatAmount:   vatAmountOf(item1Cents),
+		},
+		{
+			Type:        &physType,
+			Description: "Accessories",
+			Quantity:    quantity,
+			UnitPrice:   amountOf(item2Cents),
+			TotalAmount: amountOf(item2Cents),
+			VatRate:     vatRateStrPtr,
+			VatAmount:   vatAmountOf(item2Cents),
+		},
+		{
+			Type:        &shippingType,
+			Description: "Shipping",
+			Quantity:    quantity,
+			UnitPrice:   amountOf(shippingCents),
+			TotalAmount: amountOf(shippingCents),
+			VatRate:     vatRateStrPtr,
+			VatAmount:   vatAmountOf(shippingCents),
+		},
 	}
 
-	if shipping == 0 {
-		return []components.SessionLineItem{productLine}, nil
+	if withDiscount {
+		discountType := components.PaymentLineTypeResponseDiscount
+		lines = append(lines, components.SessionLineItem{
+			Type:        &discountType,
+			Description: "Discount (10%)",
+			Quantity:    quantity,
+			UnitPrice:   amountOf(-discountCents),
+			TotalAmount: amountOf(-discountCents),
+			VatRate:     vatRateStrPtr,
+			VatAmount:   vatAmountOf(-discountCents),
+		})
 	}
 
-	shippingType := components.PaymentLineTypeResponseShippingFee
-	shippingLine := components.SessionLineItem{
-		Type:        &shippingType,
-		Description: "Shipping",
-		Quantity:    quantity,
-		UnitPrice:   amountOf(shipping),
-		TotalAmount: amountOf(shipping),
-		VatRate:     vatRateStrPtr,
-		VatAmount:   vatAmountOf(shipping),
-	}
-
-	return []components.SessionLineItem{productLine, shippingLine}, nil
+	return lines, nil
 }
 
 // parseSessionMetadata unmarshals a JSON object string into map[string]any.
