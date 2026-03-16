@@ -275,13 +275,28 @@ mollie payments cancel <payment-id> [--confirm]
 
 #### `payments create` advanced flags
 
-`--with-lines` auto-generates order lines that sum to `--amount`. Optionally split out a separate shipping line:
+`--with-lines` auto-generates order lines that sum exactly to `--amount`. The generated set always contains:
+
+- **2 physical item lines** — the payment description and "Accessories", split roughly 60/40 of the product sub-total.
+- **1 shipping fee line** — defaults to 4.99; override with `--lines-shipping-amount`.
+
+VAT is applied to every line at the rate set by `--lines-vat-rate` (default **21.00**). Amounts are treated as VAT-inclusive (`vatAmount = total × rate / (100 + rate)`).
 
 ```bash
+# Minimal — 2 item lines + shipping, 21% VAT (all defaults)
 mollie payments create \
   --amount 24.99 --currency EUR --description "Order #42" \
   --redirect-url https://example.com/thanks \
-  --with-lines --lines-vat-rate 21.00 --lines-shipping-amount 4.99
+  --with-lines
+
+# Custom VAT rate and shipping amount
+mollie payments create ... --with-lines --lines-vat-rate 9.00 --lines-shipping-amount 2.99
+```
+
+`--with-discount` adds a fourth **discount line** (≈10% off the item sub-total) to the generated lines. It requires `--with-lines`:
+
+```bash
+mollie payments create ... --with-lines --with-discount
 ```
 
 `--with-billing` and `--with-shipping` attach address objects to the payment. Without additional flags a Dutch test address is used as a placeholder; override individual fields with `--billing-*` / `--shipping-*`:
@@ -429,7 +444,7 @@ mollie invoices get <invoice-id>
 
 ### `sessions` — sessions _(beta)_
 
-Sessions support checkout flows built with Mollie Components. Supports the same `--with-lines`, `--with-billing`, and `--with-shipping` flags as `payments create`. The Sessions API specification may still change.
+Sessions support checkout flows built with Mollie Components. Supports the same `--with-lines`, `--with-discount`, `--with-billing`, and `--with-shipping` flags as `payments create` — see the [payments create advanced flags](#payments-create-advanced-flags) section for details. The Sessions API specification may still change.
 
 ```
 mollie sessions create [flags]

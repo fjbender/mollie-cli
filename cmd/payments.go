@@ -94,8 +94,18 @@ var paymentsCmd = &cobra.Command{
 }
 
 var paymentsCreateCmd = &cobra.Command{
-	Use:         "create",
-	Short:       "Create a new payment",
+	Use:   "create",
+	Short: "Create a new payment",
+	Long: `Create a new Mollie payment.
+
+--with-lines auto-generates order lines that sum exactly to --amount:
+  • 2 physical item lines (~60/40 split of the product sub-total)
+  • 1 shipping_fee line (default 4.99; override with --lines-shipping-amount)
+  • VAT applied to every line at --lines-vat-rate (default 21.00%)
+
+Add --with-discount to append a ~10% discount line; requires --with-lines.
+
+--with-billing / --with-shipping attach a Dutch test address; override fields with --billing-* / --shipping-*.`,
 	RunE:        runPaymentsCreate,
 	Annotations: map[string]string{"usesDefaults": "true"},
 }

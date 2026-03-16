@@ -69,6 +69,9 @@ var sessionsCmd = &cobra.Command{
 	Short: "Manage Mollie sessions (beta)",
 	Long: `Create and inspect Mollie sessions for checkout flows built with Mollie Components.
 
+Use --with-lines on 'sessions create' to auto-generate order lines (2 item lines + shipping) that sum to --amount.
+Add --with-discount to include a ~10% discount line; --with-discount requires --with-lines.
+
 Note: Sessions is a beta feature. The API specification may still change.`,
 }
 
