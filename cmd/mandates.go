@@ -281,7 +281,7 @@ func runMandatesGet(_ *cobra.Command, args []string) error {
 func runMandatesRevoke(_ *cobra.Command, args []string) error {
 	customerID, mandateID := args[0], args[1]
 
-	if !manRevokeConfirm {
+	if !manRevokeConfirm && !flagYes {
 		confirmed, err := prompt.Confirm(fmt.Sprintf("Revoke mandate %s for customer %s?", mandateID, customerID))
 		if err != nil {
 			if errors.Is(err, huh.ErrUserAborted) {

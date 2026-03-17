@@ -18,6 +18,7 @@ var (
 	flagAPIKey  string
 	flagNoColor bool
 	flagEnv     string // selects a config environment for this invocation
+	flagYes     bool   // skip all confirmation prompts
 )
 
 // cfg holds the loaded configuration for the current invocation.
@@ -66,6 +67,26 @@ All commands run in test mode by default. Pass --live to operate on live data.`,
 		if !cfg.IsConfigured() {
 			return fmt.Errorf("no API key configured — run `mollie auth setup` to get started")
 		}
+
+		// Resolve the effective key: --api-key flag takes precedence over config.
+		effectiveKey := cfg.APIKey
+		if flagAPIKey != "" {
+			effectiveKey = flagAPIKey
+		}
+
+		if config.IsAPIKey(effectiveKey) {
+			if config.IsLiveAPIKey(effectiveKey) {
+				// live_ key is always live mode — --live flag has no effect.
+				flagLive = true
+			} else {
+				// test_ key is always test mode — --live flag is rejected.
+				if cmd.Flags().Changed("live") || os.Getenv("MOLLIE_LIVE_MODE") == "true" {
+					return fmt.Errorf("cannot use --live with a test_ API key: the key is fixed to test mode; use an Organization Access Token to switch modes")
+				}
+				flagLive = false
+			}
+		}
+
 		return nil
 	},
 }
@@ -102,6 +123,10 @@ func init() {
 	rootCmd.PersistentFlags().StringVarP(
 		&flagEnv, "env", "e", "",
 		"Use a specific config environment for this invocation (overrides active environment)",
+	)
+	rootCmd.PersistentFlags().BoolVarP(
+		&flagYes, "yes", "y", false,
+		"Assume yes to all confirmation prompts (use with care in live mode)",
 	)
 }
 

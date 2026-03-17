@@ -130,6 +130,26 @@ func runRefundsCreate(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("--amount and --currency must both be set (or both omitted for a full refund)")
 	}
 
+	// Require confirmation when operating on live data.
+	if flagLive && !flagYes {
+		amtDesc := "full amount"
+		if refCreateAmount != "" {
+			amtDesc = fmt.Sprintf("%s %s", refCreateAmount, refCreateCurrency)
+		}
+		confirmed, err := prompt.Confirm(fmt.Sprintf("Create a live refund of %s for payment %s?", amtDesc, paymentID))
+		if err != nil {
+			if errors.Is(err, huh.ErrUserAborted) {
+				fmt.Println("Cancelled.")
+				return nil
+			}
+			return err
+		}
+		if !confirmed {
+			fmt.Println("Cancelled.")
+			return nil
+		}
+	}
+
 	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile)
 	if err != nil {
 		return err
@@ -301,7 +321,7 @@ func runRefundsCancel(_ *cobra.Command, args []string) error {
 	paymentID := args[0]
 	refundID := args[1]
 
-	if !refCancelConfirm {
+	if !refCancelConfirm && !flagYes {
 		confirmed, err := prompt.Confirm(fmt.Sprintf("Cancel refund %s for payment %s?", refundID, paymentID))
 		if err != nil {
 			if errors.Is(err, huh.ErrUserAborted) {

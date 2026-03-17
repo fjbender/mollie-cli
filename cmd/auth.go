@@ -27,8 +27,23 @@ var authCmd = &cobra.Command{
 var authSetupCmd = &cobra.Command{
 	Use:   "setup",
 	Short: "Interactive first-run setup: configure your API key",
-	Long: `Prompt for a Mollie Organization Access Token, validate it against the
-Mollie API, and save it to the local config file.`,
+	Long: `Prompt for a Mollie Organization Access Token or API Key, validate it against the
+Mollie API, and save it to the local config file.
+
+RECOMMENDED: Organization Access Tokens (starting with access_)
+  - Access all Mollie API endpoints
+  - Support both test and live mode via the --live flag
+  - Work across all profiles
+
+DISCOURAGED: API Keys (starting with test_ or live_)
+  - Limited to specific endpoints (no access to organization-level resources)
+  - Mode is fixed by the key prefix: test_ keys are always in test mode,
+    live_ keys are always in live mode — the --live flag has no effect
+  - Scoped to a single profile; cannot be used across profiles
+
+If you use a live_ API key, destructive operations (refunds, cancellations,
+deletions) will always prompt for confirmation to prevent accidental changes
+to live data. Pass -y to bypass these prompts in automated scripts.`,
 	RunE: runAuthSetup,
 }
 

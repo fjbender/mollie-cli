@@ -366,7 +366,7 @@ func runCustomersUpdate(cmd *cobra.Command, args []string) error {
 func runCustomersDelete(_ *cobra.Command, args []string) error {
 	customerID := args[0]
 
-	if !custDeleteConfirm {
+	if !custDeleteConfirm && !flagYes {
 		confirmed, err := prompt.Confirm(fmt.Sprintf("Delete customer %s? This will also cancel all their mandates and subscriptions.", customerID))
 		if err != nil {
 			if errors.Is(err, huh.ErrUserAborted) {

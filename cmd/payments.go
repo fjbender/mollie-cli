@@ -536,7 +536,7 @@ func runPaymentsUpdate(cmd *cobra.Command, args []string) error {
 func runPaymentsCancel(_ *cobra.Command, args []string) error {
 	paymentID := args[0]
 
-	if !payConfirm {
+	if !payConfirm && !flagYes {
 		confirmed, err := prompt.Confirm(fmt.Sprintf("Cancel payment %s?", paymentID))
 		if err != nil {
 			if errors.Is(err, huh.ErrUserAborted) {

@@ -540,7 +540,7 @@ func runSubscriptionsUpdate(cmd *cobra.Command, args []string) error {
 func runSubscriptionsCancel(_ *cobra.Command, args []string) error {
 	customerID, subscriptionID := args[0], args[1]
 
-	if !subCancelConfirm {
+	if !subCancelConfirm && !flagYes {
 		confirmed, err := prompt.Confirm(fmt.Sprintf("Cancel subscription %s for customer %s?", subscriptionID, customerID))
 		if err != nil {
 			if errors.Is(err, huh.ErrUserAborted) {

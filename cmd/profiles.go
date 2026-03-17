@@ -367,7 +367,7 @@ func runProfilesUpdate(cmd *cobra.Command, args []string) error {
 func runProfilesDelete(_ *cobra.Command, args []string) error {
 	profileID := args[0]
 
-	if !profConfirm {
+	if !profConfirm && !flagYes {
 		confirmed, err := prompt.Confirm(fmt.Sprintf("Delete profile %s?", profileID))
 		if err != nil {
 			if errors.Is(err, huh.ErrUserAborted) {

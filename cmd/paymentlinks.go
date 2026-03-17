@@ -347,7 +347,7 @@ func runPaymentLinksUpdate(cmd *cobra.Command, args []string) error {
 func runPaymentLinksDelete(_ *cobra.Command, args []string) error {
 	linkID := args[0]
 
-	if !plConfirm {
+	if !plConfirm && !flagYes {
 		confirmed, err := prompt.Confirm(fmt.Sprintf("Delete payment link %s?", linkID))
 		if err != nil {
 			if errors.Is(err, huh.ErrUserAborted) {
