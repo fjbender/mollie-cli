@@ -14,6 +14,19 @@ git clone https://github.com/fjbender/mollie-cli && cd mollie-cli && go build -o
 
 (Assuming the `~/bin` directory is in your `$PATH`)
 
+## Claude Code integration
+
+If you use [Claude Code](https://claude.ai/code), a skill file is included that teaches Claude how to use `mollie-cli` — command syntax, flag precedence, common workflows, and pitfalls.
+
+Install it by copying the skill into your Claude skills directory:
+
+```bash
+mkdir -p ~/.claude/skills/mollie-cli
+cp skills/mollie-cli/SKILL.md ~/.claude/skills/mollie-cli/SKILL.md
+```
+
+Once installed, Claude will automatically use the skill whenever you ask it to help with `mollie-cli` commands.
+
 ## Quick start
 
 ```bash

@@ -1,5 +1,5 @@
 # Binaries
-mollie-cli
+/mollie-cli
 *.exe
 *.exe~
 *.dll
@@ -39,3 +39,6 @@ Thumbs.db
 *.swp
 *.swo
 *~
+
+# Claude Code local settings
+.claude/settings.local.json
