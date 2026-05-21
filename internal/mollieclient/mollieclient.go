@@ -2,11 +2,13 @@ package mollieclient
 
 import (
 	"fmt"
+	"net/http"
 
 	mollieapi "github.com/mollie/mollie-api-golang"
 	"github.com/mollie/mollie-api-golang/models/components"
 
 	"github.com/fjbender/mollie-cli/internal/config"
+	"github.com/fjbender/mollie-cli/internal/verbose"
 )
 
 // New initialises the Mollie SDK client from the resolved configuration and any
@@ -17,7 +19,8 @@ import (
 //     (ignored when key is an API key — mode is determined by key prefix)
 //   - profileID      — set from --profile flag; takes precedence over cfg.ProfileID
 //     (ignored when key is an API key — profile is baked into the key)
-func New(cfg *config.Config, apiKeyOverride string, liveMode bool, profileID string) (*mollieapi.Client, error) {
+//   - verboseLevel   — set from --verbose flag; enables HTTP request/response logging
+func New(cfg *config.Config, apiKeyOverride string, liveMode bool, profileID string, verboseLevel int) (*mollieapi.Client, error) {
 	apiKey := cfg.APIKey
 	if apiKeyOverride != "" {
 		apiKey = apiKeyOverride
@@ -58,6 +61,15 @@ func New(cfg *config.Config, apiKeyOverride string, liveMode bool, profileID str
 		}
 	}
 
+	if verboseLevel > 0 {
+		opts = append(opts, mollieapi.WithClient(&http.Client{
+			Transport: &verbose.LoggingTransport{
+				Level: verboseLevel,
+				Inner: http.DefaultTransport,
+			},
+		}))
+	}
+
 	return mollieapi.New(opts...), nil
 }
 
@@ -65,7 +77,7 @@ func New(cfg *config.Config, apiKeyOverride string, liveMode bool, profileID str
 // only accept an organization access token and do not support profileId or
 // testmode (e.g. Invoices). It deliberately omits both WithProfileID and
 // WithTestmode, and must not delegate to New (which falls back to cfg.ProfileID).
-func NewOrganizationClient(cfg *config.Config, apiKeyOverride string) (*mollieapi.Client, error) {
+func NewOrganizationClient(cfg *config.Config, apiKeyOverride string, verboseLevel int) (*mollieapi.Client, error) {
 	apiKey := cfg.APIKey
 	if apiKeyOverride != "" {
 		apiKey = apiKeyOverride
@@ -79,6 +91,15 @@ func NewOrganizationClient(cfg *config.Config, apiKeyOverride string) (*mollieap
 			OAuth: &apiKey,
 		}),
 		// testmode and profileId are deliberately omitted — not supported by this endpoint.
+	}
+
+	if verboseLevel > 0 {
+		opts = append(opts, mollieapi.WithClient(&http.Client{
+			Transport: &verbose.LoggingTransport{
+				Level: verboseLevel,
+				Inner: http.DefaultTransport,
+			},
+		}))
 	}
 
 	return mollieapi.New(opts...), nil
