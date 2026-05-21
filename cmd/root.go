@@ -19,6 +19,7 @@ var (
 	flagNoColor bool
 	flagEnv     string // selects a config environment for this invocation
 	flagYes     bool   // skip all confirmation prompts
+	flagVerbose int    // -v = 1 (JSON bodies), -vv = 2 (full wire format)
 )
 
 // cfg holds the loaded configuration for the current invocation.
@@ -127,6 +128,10 @@ func init() {
 	rootCmd.PersistentFlags().BoolVarP(
 		&flagYes, "yes", "y", false,
 		"Assume yes to all confirmation prompts (use with care in live mode)",
+	)
+	rootCmd.PersistentFlags().CountVarP(
+		&flagVerbose, "verbose", "v",
+		"Verbose output: -v logs JSON request/response bodies, -vv logs full HTTP wire format",
 	)
 }
 
