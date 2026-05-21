@@ -56,7 +56,7 @@ func TestLevel0Passthrough(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer resp.Body.Close()
-	io.ReadAll(resp.Body)
+	_, _ = io.ReadAll(resp.Body)
 
 	if buf.Len() != 0 {
 		t.Errorf("level 0 should write nothing, got: %q", buf.String())
@@ -79,7 +79,7 @@ func TestLevel1LogsJSONBodies(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer resp.Body.Close()
-	io.ReadAll(resp.Body)
+	_, _ = io.ReadAll(resp.Body)
 
 	out := buf.String()
 	mustContain(t, out, "→ POST")
@@ -127,7 +127,7 @@ func TestLevel2FullWireFormat(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer resp.Body.Close()
-	io.ReadAll(resp.Body)
+	_, _ = io.ReadAll(resp.Body)
 
 	out := buf.String()
 	// Every non-blank line must start with "> " or "< "
@@ -158,7 +158,7 @@ func TestLevel2RedactsTestKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer resp.Body.Close()
-	io.ReadAll(resp.Body)
+	_, _ = io.ReadAll(resp.Body)
 
 	out := buf.String()
 	mustContain(t, out, "Authorization: Bearer test_[REDACTED]")
@@ -180,7 +180,7 @@ func TestLevel2RedactsLiveKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer resp.Body.Close()
-	io.ReadAll(resp.Body)
+	_, _ = io.ReadAll(resp.Body)
 
 	out := buf.String()
 	mustContain(t, out, "Authorization: Bearer live_[REDACTED]")
@@ -202,7 +202,7 @@ func TestLevel2RedactsOAuthToken(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer resp.Body.Close()
-	io.ReadAll(resp.Body)
+	_, _ = io.ReadAll(resp.Body)
 
 	out := buf.String()
 	mustContain(t, out, "Authorization: Bearer [REDACTED]")
