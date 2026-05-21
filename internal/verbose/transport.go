@@ -62,6 +62,7 @@ func (t *LoggingTransport) roundTripLevel1(req *http.Request) (*http.Response, e
 	if req.Body != nil {
 		var err error
 		reqBody, err = io.ReadAll(req.Body)
+		req.Body.Close()
 		if err != nil {
 			return nil, err
 		}
