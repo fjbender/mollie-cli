@@ -44,11 +44,12 @@ func (t *LoggingTransport) writer() io.Writer {
 	return os.Stderr
 }
 
+// RoundTrip implements http.RoundTripper.
 func (t *LoggingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	switch {
-	case t.Level == 0:
+	switch t.Level {
+	case 0:
 		return t.inner().RoundTrip(req)
-	case t.Level == 1:
+	case 1:
 		return t.roundTripLevel1(req)
 	default:
 		return t.roundTripLevel2(req)
@@ -62,14 +63,14 @@ func (t *LoggingTransport) roundTripLevel1(req *http.Request) (*http.Response, e
 	if req.Body != nil {
 		var err error
 		reqBody, err = io.ReadAll(req.Body)
-		req.Body.Close()
+		_ = req.Body.Close()
 		if err != nil {
 			return nil, err
 		}
 		req.Body = io.NopCloser(bytes.NewReader(reqBody))
 	}
 
-	fmt.Fprintf(w, "→ %s %s\n", req.Method, req.URL)
+	_, _ = fmt.Fprintf(w, "→ %s %s\n", req.Method, req.URL)
 	if len(reqBody) > 0 {
 		prettyJSON(w, reqBody)
 	}
@@ -85,7 +86,7 @@ func (t *LoggingTransport) roundTripLevel1(req *http.Request) (*http.Response, e
 	}
 	resp.Body = io.NopCloser(bytes.NewReader(respBody))
 
-	fmt.Fprintf(w, "← %s\n", resp.Status)
+	_, _ = fmt.Fprintf(w, "← %s\n", resp.Status)
 	if len(respBody) > 0 {
 		prettyJSON(w, respBody)
 	}
@@ -101,7 +102,7 @@ func (t *LoggingTransport) roundTripLevel2(req *http.Request) (*http.Response, e
 	if req.Body != nil {
 		var err error
 		bodyCopy, err = io.ReadAll(req.Body)
-		req.Body.Close()
+		_ = req.Body.Close()
 		if err != nil {
 			return nil, err
 		}
@@ -118,7 +119,7 @@ func (t *LoggingTransport) roundTripLevel2(req *http.Request) (*http.Response, e
 	}
 
 	writeLines(w, "> ", redactAuthorization(reqDump))
-	fmt.Fprintln(w) // blank line between request and response
+	_, _ = fmt.Fprintln(w) // blank line between request and response
 
 	resp, err := t.inner().RoundTrip(req)
 	if err != nil {
@@ -139,7 +140,7 @@ func (t *LoggingTransport) roundTripLevel2(req *http.Request) (*http.Response, e
 func writeLines(w io.Writer, prefix string, data []byte) {
 	sc := bufio.NewScanner(bytes.NewReader(data))
 	for sc.Scan() {
-		fmt.Fprintf(w, "%s%s\n", prefix, sc.Text())
+		_, _ = fmt.Fprintf(w, "%s%s\n", prefix, sc.Text())
 	}
 }
 
@@ -147,11 +148,11 @@ func writeLines(w io.Writer, prefix string, data []byte) {
 func prettyJSON(w io.Writer, data []byte) {
 	var buf bytes.Buffer
 	if err := json.Indent(&buf, data, "", "  "); err != nil {
-		w.Write(data)
+		_, _ = w.Write(data)
 	} else {
-		w.Write(buf.Bytes())
+		_, _ = w.Write(buf.Bytes())
 	}
-	fmt.Fprintln(w)
+	_, _ = fmt.Fprintln(w)
 }
 
 // redactAuthorization replaces the secret part of a Bearer token while keeping

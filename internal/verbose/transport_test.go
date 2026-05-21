@@ -17,7 +17,7 @@ func backend(body string, status int) *httptest.Server {
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(status)
-		io.WriteString(w, body)
+		_, _ = io.WriteString(w, body)
 	}))
 }
 
@@ -55,7 +55,7 @@ func TestLevel0Passthrough(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	_, _ = io.ReadAll(resp.Body)
 
 	if buf.Len() != 0 {
@@ -78,7 +78,7 @@ func TestLevel1LogsJSONBodies(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	_, _ = io.ReadAll(resp.Body)
 
 	out := buf.String()
@@ -101,7 +101,7 @@ func TestLevel1ResponseBodyStillReadable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	got, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -126,7 +126,7 @@ func TestLevel2FullWireFormat(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	_, _ = io.ReadAll(resp.Body)
 
 	out := buf.String()
@@ -157,7 +157,7 @@ func TestLevel2RedactsTestKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	_, _ = io.ReadAll(resp.Body)
 
 	out := buf.String()
@@ -179,7 +179,7 @@ func TestLevel2RedactsLiveKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	_, _ = io.ReadAll(resp.Body)
 
 	out := buf.String()
@@ -201,7 +201,7 @@ func TestLevel2RedactsOAuthToken(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	_, _ = io.ReadAll(resp.Body)
 
 	out := buf.String()
@@ -220,7 +220,7 @@ func TestLevel2ResponseBodyStillReadable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	got, err := io.ReadAll(resp.Body)
 	if err != nil {
