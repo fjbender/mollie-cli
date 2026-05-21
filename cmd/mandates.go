@@ -136,7 +136,7 @@ func runMandatesCreate(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("required flag \"consumer-name\" not set")
 	}
 
-	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile)
+	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile, flagVerbose)
 	if err != nil {
 		return err
 	}
@@ -190,7 +190,7 @@ func runMandatesCreate(cmd *cobra.Command, args []string) error {
 }
 
 func runMandatesList(_ *cobra.Command, args []string) error {
-	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile)
+	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile, flagVerbose)
 	if err != nil {
 		return err
 	}
@@ -238,7 +238,7 @@ func runMandatesList(_ *cobra.Command, args []string) error {
 }
 
 func runMandatesGet(_ *cobra.Command, args []string) error {
-	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile)
+	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile, flagVerbose)
 	if err != nil {
 		return err
 	}
@@ -296,7 +296,7 @@ func runMandatesRevoke(_ *cobra.Command, args []string) error {
 		}
 	}
 
-	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile)
+	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile, flagVerbose)
 	if err != nil {
 		return err
 	}

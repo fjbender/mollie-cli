@@ -104,7 +104,7 @@ func runCapturesCreate(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("--amount and --currency must both be set (or both omitted to capture the full amount)")
 	}
 
-	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile)
+	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile, flagVerbose)
 	if err != nil {
 		return err
 	}
@@ -159,7 +159,7 @@ func runCapturesCreate(cmd *cobra.Command, args []string) error {
 }
 
 func runCapturesList(_ *cobra.Command, args []string) error {
-	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile)
+	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile, flagVerbose)
 	if err != nil {
 		return err
 	}
@@ -211,7 +211,7 @@ func runCapturesList(_ *cobra.Command, args []string) error {
 }
 
 func runCapturesGet(_ *cobra.Command, args []string) error {
-	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile)
+	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile, flagVerbose)
 	if err != nil {
 		return err
 	}

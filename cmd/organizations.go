@@ -39,7 +39,7 @@ func init() {
 // ── handlers ─────────────────────────────────────────────────────────────────
 
 func runOrganizationsCurrent(_ *cobra.Command, _ []string) error {
-	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile)
+	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile, flagVerbose)
 	if err != nil {
 		return err
 	}
@@ -67,7 +67,7 @@ func runOrganizationsCurrent(_ *cobra.Command, _ []string) error {
 }
 
 func runOrganizationsGet(_ *cobra.Command, args []string) error {
-	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile)
+	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile, flagVerbose)
 	if err != nil {
 		return err
 	}

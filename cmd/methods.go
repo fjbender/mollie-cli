@@ -97,7 +97,7 @@ func init() {
 // ── handlers ─────────────────────────────────────────────────────────────────
 
 func runMethodsList(_ *cobra.Command, _ []string) error {
-	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile)
+	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile, flagVerbose)
 	if err != nil {
 		return err
 	}
@@ -171,7 +171,7 @@ func runMethodsList(_ *cobra.Command, _ []string) error {
 }
 
 func runMethodsListAll(_ *cobra.Command, _ []string) error {
-	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile)
+	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile, flagVerbose)
 	if err != nil {
 		return err
 	}
@@ -238,7 +238,7 @@ func runMethodsListAll(_ *cobra.Command, _ []string) error {
 }
 
 func runMethodsGet(_ *cobra.Command, args []string) error {
-	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile)
+	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile, flagVerbose)
 	if err != nil {
 		return err
 	}

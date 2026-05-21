@@ -192,7 +192,7 @@ func runSessionsCreate(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("required flag \"redirect-url\" not set and no default configured (run `mollie defaults set`)")
 	}
 
-	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile)
+	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile, flagVerbose)
 	if err != nil {
 		return err
 	}
@@ -278,7 +278,7 @@ func runSessionsGet(_ *cobra.Command, args []string) error {
 	// Sessions are bound to a profile and mode at creation time; the GET
 	// endpoint does not accept profileId or testmode. Use the auth-only client
 	// that deliberately omits both parameters.
-	client, err := mollieclient.NewOrganizationClient(cfg, flagAPIKey)
+	client, err := mollieclient.NewOrganizationClient(cfg, flagAPIKey, flagVerbose)
 	if err != nil {
 		return err
 	}

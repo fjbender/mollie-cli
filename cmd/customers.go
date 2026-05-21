@@ -177,7 +177,7 @@ func runCustomersCreate(cmd *cobra.Command, _ []string) error {
 		}
 	}
 
-	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile)
+	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile, flagVerbose)
 	if err != nil {
 		return err
 	}
@@ -225,7 +225,7 @@ func runCustomersCreate(cmd *cobra.Command, _ []string) error {
 }
 
 func runCustomersList(_ *cobra.Command, _ []string) error {
-	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile)
+	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile, flagVerbose)
 	if err != nil {
 		return err
 	}
@@ -271,7 +271,7 @@ func runCustomersList(_ *cobra.Command, _ []string) error {
 }
 
 func runCustomersGet(_ *cobra.Command, args []string) error {
-	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile)
+	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile, flagVerbose)
 	if err != nil {
 		return err
 	}
@@ -329,7 +329,7 @@ func runCustomersUpdate(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile)
+	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile, flagVerbose)
 	if err != nil {
 		return err
 	}
@@ -381,7 +381,7 @@ func runCustomersDelete(_ *cobra.Command, args []string) error {
 		}
 	}
 
-	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile)
+	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile, flagVerbose)
 	if err != nil {
 		return err
 	}
@@ -443,7 +443,7 @@ func runCustomersPaymentsCreate(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("required flag \"redirect-url\" not set")
 	}
 
-	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile)
+	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile, flagVerbose)
 	if err != nil {
 		return err
 	}
@@ -511,7 +511,7 @@ func runCustomersPaymentsCreate(cmd *cobra.Command, args []string) error {
 }
 
 func runCustomersPaymentsList(_ *cobra.Command, args []string) error {
-	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile)
+	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile, flagVerbose)
 	if err != nil {
 		return err
 	}

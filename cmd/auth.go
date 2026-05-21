@@ -93,7 +93,7 @@ func runAuthSetup(_ *cobra.Command, _ []string) error {
 		// API keys are mode- and profile-scoped; validate via list-methods which
 		// works for all key types and requires no special parameters.
 		liveMode := config.IsLiveAPIKey(apiKey)
-		client, err := mollieclient.New(tmpCfg, "", liveMode, "")
+		client, err := mollieclient.New(tmpCfg, "", liveMode, "", flagVerbose)
 		if err != nil {
 			return err
 		}
@@ -106,7 +106,7 @@ func runAuthSetup(_ *cobra.Command, _ []string) error {
 		// offer interactive profile selection.
 		// NewOrganizationClient omits WithTestmode/WithProfileID — both are
 		// unsupported by organization-level endpoints.
-		client, err := mollieclient.NewOrganizationClient(tmpCfg, "")
+		client, err := mollieclient.NewOrganizationClient(tmpCfg, "", flagVerbose)
 		if err != nil {
 			return err
 		}

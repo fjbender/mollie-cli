@@ -50,7 +50,7 @@ func init() {
 // ── handlers ─────────────────────────────────────────────────────────────────
 
 func runTerminalsList(_ *cobra.Command, _ []string) error {
-	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile)
+	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile, flagVerbose)
 	if err != nil {
 		return err
 	}
@@ -98,7 +98,7 @@ func runTerminalsList(_ *cobra.Command, _ []string) error {
 }
 
 func runTerminalsGet(_ *cobra.Command, args []string) error {
-	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile)
+	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile, flagVerbose)
 	if err != nil {
 		return err
 	}

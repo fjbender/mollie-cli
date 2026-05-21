@@ -271,7 +271,7 @@ func runPaymentsCreate(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("required flag \"redirect-url\" not set and no default configured (run `mollie defaults set`)")
 	}
 
-	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile)
+	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile, flagVerbose)
 	if err != nil {
 		return err
 	}
@@ -399,7 +399,7 @@ func runPaymentsCreate(cmd *cobra.Command, _ []string) error {
 }
 
 func runPaymentsList(_ *cobra.Command, _ []string) error {
-	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile)
+	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile, flagVerbose)
 	if err != nil {
 		return err
 	}
@@ -446,7 +446,7 @@ func runPaymentsList(_ *cobra.Command, _ []string) error {
 }
 
 func runPaymentsGet(_ *cobra.Command, args []string) error {
-	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile)
+	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile, flagVerbose)
 	if err != nil {
 		return err
 	}
@@ -496,7 +496,7 @@ func runPaymentsUpdate(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile)
+	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile, flagVerbose)
 	if err != nil {
 		return err
 	}
@@ -551,7 +551,7 @@ func runPaymentsCancel(_ *cobra.Command, args []string) error {
 		}
 	}
 
-	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile)
+	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile, flagVerbose)
 	if err != nil {
 		return err
 	}

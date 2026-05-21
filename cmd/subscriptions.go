@@ -228,7 +228,7 @@ func runSubscriptionsCreate(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("required flag \"interval\" not set")
 	}
 
-	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile)
+	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile, flagVerbose)
 	if err != nil {
 		return err
 	}
@@ -294,7 +294,7 @@ func runSubscriptionsCreate(cmd *cobra.Command, args []string) error {
 }
 
 func runSubscriptionsList(_ *cobra.Command, args []string) error {
-	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile)
+	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile, flagVerbose)
 	if err != nil {
 		return err
 	}
@@ -342,7 +342,7 @@ func runSubscriptionsList(_ *cobra.Command, args []string) error {
 }
 
 func runSubscriptionsListAll(_ *cobra.Command, _ []string) error {
-	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile)
+	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile, flagVerbose)
 	if err != nil {
 		return err
 	}
@@ -390,7 +390,7 @@ func runSubscriptionsListAll(_ *cobra.Command, _ []string) error {
 }
 
 func runSubscriptionsGet(_ *cobra.Command, args []string) error {
-	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile)
+	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile, flagVerbose)
 	if err != nil {
 		return err
 	}
@@ -485,7 +485,7 @@ func runSubscriptionsUpdate(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("--amount and --currency must both be set")
 	}
 
-	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile)
+	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile, flagVerbose)
 	if err != nil {
 		return err
 	}
@@ -555,7 +555,7 @@ func runSubscriptionsCancel(_ *cobra.Command, args []string) error {
 		}
 	}
 
-	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile)
+	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile, flagVerbose)
 	if err != nil {
 		return err
 	}
@@ -569,7 +569,7 @@ func runSubscriptionsCancel(_ *cobra.Command, args []string) error {
 }
 
 func runSubscriptionsPayments(_ *cobra.Command, args []string) error {
-	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile)
+	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile, flagVerbose)
 	if err != nil {
 		return err
 	}

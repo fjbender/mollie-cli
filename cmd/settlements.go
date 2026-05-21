@@ -112,7 +112,7 @@ func init() {
 // ── handlers ─────────────────────────────────────────────────────────────────
 
 func runSettlementsList(_ *cobra.Command, _ []string) error {
-	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile)
+	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile, flagVerbose)
 	if err != nil {
 		return err
 	}
@@ -161,7 +161,7 @@ func runSettlementsList(_ *cobra.Command, _ []string) error {
 }
 
 func runSettlementsGet(_ *cobra.Command, args []string) error {
-	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile)
+	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile, flagVerbose)
 	if err != nil {
 		return err
 	}
@@ -199,7 +199,7 @@ func runSettlementsGet(_ *cobra.Command, args []string) error {
 }
 
 func runSettlementsOpen(_ *cobra.Command, _ []string) error {
-	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile)
+	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile, flagVerbose)
 	if err != nil {
 		return err
 	}
@@ -235,7 +235,7 @@ func runSettlementsOpen(_ *cobra.Command, _ []string) error {
 }
 
 func runSettlementsNext(_ *cobra.Command, _ []string) error {
-	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile)
+	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile, flagVerbose)
 	if err != nil {
 		return err
 	}
@@ -271,7 +271,7 @@ func runSettlementsNext(_ *cobra.Command, _ []string) error {
 }
 
 func runSettlementsPayments(_ *cobra.Command, args []string) error {
-	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile)
+	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile, flagVerbose)
 	if err != nil {
 		return err
 	}
@@ -320,7 +320,7 @@ func runSettlementsPayments(_ *cobra.Command, args []string) error {
 }
 
 func runSettlementsRefunds(_ *cobra.Command, args []string) error {
-	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile)
+	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile, flagVerbose)
 	if err != nil {
 		return err
 	}
@@ -370,7 +370,7 @@ func runSettlementsRefunds(_ *cobra.Command, args []string) error {
 }
 
 func runSettlementsCaptures(_ *cobra.Command, args []string) error {
-	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile)
+	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile, flagVerbose)
 	if err != nil {
 		return err
 	}
@@ -422,7 +422,7 @@ func runSettlementsCaptures(_ *cobra.Command, args []string) error {
 }
 
 func runSettlementsChargebacks(_ *cobra.Command, args []string) error {
-	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile)
+	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile, flagVerbose)
 	if err != nil {
 		return err
 	}

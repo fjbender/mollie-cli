@@ -56,7 +56,7 @@ func init() {
 
 func runInvoicesList(_ *cobra.Command, _ []string) error {
 	// Invoices does not support testmode or profileId; use an org-level client.
-	client, err := mollieclient.NewOrganizationClient(cfg, flagAPIKey)
+	client, err := mollieclient.NewOrganizationClient(cfg, flagAPIKey, flagVerbose)
 	if err != nil {
 		return err
 	}
@@ -111,7 +111,7 @@ func runInvoicesList(_ *cobra.Command, _ []string) error {
 
 func runInvoicesGet(_ *cobra.Command, args []string) error {
 	// Invoices does not support testmode or profileId; use an org-level client.
-	client, err := mollieclient.NewOrganizationClient(cfg, flagAPIKey)
+	client, err := mollieclient.NewOrganizationClient(cfg, flagAPIKey, flagVerbose)
 	if err != nil {
 		return err
 	}

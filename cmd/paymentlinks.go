@@ -168,7 +168,7 @@ func runPaymentLinksCreate(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("required flag \"description\" not set and no default configured (run `mollie defaults set`)")
 	}
 
-	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile)
+	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile, flagVerbose)
 	if err != nil {
 		return err
 	}
@@ -230,7 +230,7 @@ func runPaymentLinksCreate(cmd *cobra.Command, _ []string) error {
 }
 
 func runPaymentLinksList(_ *cobra.Command, _ []string) error {
-	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile)
+	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile, flagVerbose)
 	if err != nil {
 		return err
 	}
@@ -274,7 +274,7 @@ func runPaymentLinksList(_ *cobra.Command, _ []string) error {
 }
 
 func runPaymentLinksGet(_ *cobra.Command, args []string) error {
-	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile)
+	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile, flagVerbose)
 	if err != nil {
 		return err
 	}
@@ -316,7 +316,7 @@ func runPaymentLinksUpdate(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile)
+	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile, flagVerbose)
 	if err != nil {
 		return err
 	}
@@ -362,7 +362,7 @@ func runPaymentLinksDelete(_ *cobra.Command, args []string) error {
 		}
 	}
 
-	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile)
+	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile, flagVerbose)
 	if err != nil {
 		return err
 	}
@@ -376,7 +376,7 @@ func runPaymentLinksDelete(_ *cobra.Command, args []string) error {
 }
 
 func runPaymentLinksPayments(_ *cobra.Command, args []string) error {
-	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile)
+	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile, flagVerbose)
 	if err != nil {
 		return err
 	}

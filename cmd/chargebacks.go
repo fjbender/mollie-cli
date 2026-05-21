@@ -67,7 +67,7 @@ func init() {
 // ── handlers ─────────────────────────────────────────────────────────────────
 
 func runChargebacksList(_ *cobra.Command, args []string) error {
-	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile)
+	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile, flagVerbose)
 	if err != nil {
 		return err
 	}
@@ -121,7 +121,7 @@ func runChargebacksList(_ *cobra.Command, args []string) error {
 }
 
 func runChargebacksListAll(_ *cobra.Command, _ []string) error {
-	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile)
+	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile, flagVerbose)
 	if err != nil {
 		return err
 	}
@@ -174,7 +174,7 @@ func runChargebacksListAll(_ *cobra.Command, _ []string) error {
 }
 
 func runChargebacksGet(_ *cobra.Command, args []string) error {
-	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile)
+	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile, flagVerbose)
 	if err != nil {
 		return err
 	}

@@ -98,7 +98,7 @@ func init() {
 
 func runBalancesList(_ *cobra.Command, _ []string) error {
 	// Balances does not support testmode or profileId; use an org-level client.
-	client, err := mollieclient.NewOrganizationClient(cfg, flagAPIKey)
+	client, err := mollieclient.NewOrganizationClient(cfg, flagAPIKey, flagVerbose)
 	if err != nil {
 		return err
 	}
@@ -154,7 +154,7 @@ func runBalancesGet(_ *cobra.Command, args []string) error {
 	balanceID := args[0]
 
 	// Balances does not support testmode or profileId; use an org-level client.
-	client, err := mollieclient.NewOrganizationClient(cfg, flagAPIKey)
+	client, err := mollieclient.NewOrganizationClient(cfg, flagAPIKey, flagVerbose)
 	if err != nil {
 		return err
 	}
@@ -183,7 +183,7 @@ func runBalancesGet(_ *cobra.Command, args []string) error {
 
 func runBalancesPrimary(_ *cobra.Command, _ []string) error {
 	// Balances does not support testmode or profileId; use an org-level client.
-	client, err := mollieclient.NewOrganizationClient(cfg, flagAPIKey)
+	client, err := mollieclient.NewOrganizationClient(cfg, flagAPIKey, flagVerbose)
 	if err != nil {
 		return err
 	}
@@ -214,7 +214,7 @@ func runBalancesReport(_ *cobra.Command, args []string) error {
 	balanceID := args[0]
 
 	// Balances does not support testmode or profileId; use an org-level client.
-	client, err := mollieclient.NewOrganizationClient(cfg, flagAPIKey)
+	client, err := mollieclient.NewOrganizationClient(cfg, flagAPIKey, flagVerbose)
 	if err != nil {
 		return err
 	}
@@ -258,7 +258,7 @@ func runBalancesTransactions(_ *cobra.Command, args []string) error {
 	balanceID := args[0]
 
 	// Balances does not support testmode or profileId; use an org-level client.
-	client, err := mollieclient.NewOrganizationClient(cfg, flagAPIKey)
+	client, err := mollieclient.NewOrganizationClient(cfg, flagAPIKey, flagVerbose)
 	if err != nil {
 		return err
 	}
