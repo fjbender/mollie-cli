@@ -51,6 +51,9 @@ var (
 	// locale flag
 	payCreateLocale string
 
+	// terminal ID flag
+	payCreateTerminalID string
+
 	// --with-lines flags
 	payCreateWithLines     bool
 	payCreateWithDiscount  bool
@@ -150,6 +153,7 @@ func init() {
 	paymentsCreateCmd.Flags().StringVar(&payCreateMetadata, "metadata", "", "Arbitrary JSON metadata to attach to the payment")
 	paymentsCreateCmd.Flags().StringVar(&payCreateCaptureMode, "capture-mode", "", "Capture mode: automatic or manual")
 	paymentsCreateCmd.Flags().StringVar(&payCreateLocale, "locale", "", "Locale for the payment, e.g. en_US, nl_NL (determines checkout language)")
+	paymentsCreateCmd.Flags().StringVar(&payCreateTerminalID, "terminal-id", "", "Terminal ID for point-of-sale payments")
 
 	// --with-lines flags
 	paymentsCreateCmd.Flags().BoolVar(&payCreateWithLines, "with-lines", false, "Auto-generate order lines summing to --amount (always 2 item lines + 1 shipping line)")
@@ -249,6 +253,9 @@ func runPaymentsCreate(cmd *cobra.Command, _ []string) error {
 		if v, ok := input.Str(jsonInput, "locale"); ok && !cmd.Flags().Changed("locale") {
 			payCreateLocale = v
 		}
+		if v, ok := input.Str(jsonInput, "terminalId"); ok && !cmd.Flags().Changed("terminal-id") {
+			payCreateTerminalID = v
+		}
 		if v, ok := input.RawJSON(jsonInput, "metadata"); ok && !cmd.Flags().Changed("metadata") {
 			payCreateMetadata = v
 		}
@@ -315,6 +322,7 @@ func runPaymentsCreate(cmd *cobra.Command, _ []string) error {
 	req.CaptureMode = nil
 	req.Locale = nil
 	req.Metadata = nil
+	req.TerminalID = nil
 
 	if payCreateWebhookURL != "" {
 		req.WebhookURL = &payCreateWebhookURL
@@ -338,6 +346,9 @@ func runPaymentsCreate(cmd *cobra.Command, _ []string) error {
 	if payCreateLocale != "" {
 		l := components.Locale(payCreateLocale)
 		req.Locale = &l
+	}
+	if payCreateTerminalID != "" {
+		req.TerminalID = &payCreateTerminalID
 	}
 	if payCreateMetadata != "" {
 		meta, err := parseMetadata(payCreateMetadata)
