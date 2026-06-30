@@ -58,6 +58,8 @@ mollie defaults unset --all             # clear everything
 | `methods` | `list` `list-all` `get <id>` |
 | `profiles` | `list` `get <id>` `current` `create` `update <id>` `delete <id>` |
 | `organizations` | `current` `get <id>` |
+| `webhooks` | `create` `list` `get <id>` `update <id>` `delete <id>` `ping <id>` |
+| `webhooks events` | `get <event-id>` |
 | `invoices` | `list` `get <id>` |
 | `terminals` | `list` `get <id>` |
 
