@@ -181,7 +181,7 @@ func newWhClient() *whClient {
 		key = flagAPIKey
 	}
 
-	var transport http.RoundTripper = http.DefaultTransport
+	transport := http.DefaultTransport
 	if flagVerbose > 0 {
 		transport = &verbose.LoggingTransport{Level: flagVerbose, Inner: transport}
 	}
@@ -260,7 +260,7 @@ func (c *whClient) do(ctx context.Context, method, path string, query url.Values
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode >= 400 {
 		var apiErr struct {
