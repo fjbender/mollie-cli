@@ -464,6 +464,22 @@ mollie sessions create [flags]
 mollie sessions get <session-id>
 ```
 
+### `webhooks` — webhook subscriptions
+
+```
+mollie webhooks create --name <n> --url <u> --event-types <types>
+mollie webhooks list [--limit N] [--from <webhook-id>] [--sort asc|desc] \
+                     [--event-types <type>]
+mollie webhooks get <webhook-id>
+mollie webhooks update <webhook-id> [--name <n>] [--url <u>] \
+                       [--event-types <types>]
+mollie webhooks delete <webhook-id> [--confirm]
+mollie webhooks ping <webhook-id>
+mollie webhooks events get <event-id>
+```
+
+Pass `--event-types` as a comma-separated list (e.g. `payment.paid,refund.refunded`) or `*` to subscribe to all event types. The `create` response includes a `Webhook Secret` for verifying incoming payloads — store it securely; it is not shown again.
+
 ### `defaults` — stored defaults
 
 ```
