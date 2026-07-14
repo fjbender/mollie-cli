@@ -54,6 +54,9 @@ var (
 	// terminal ID flag
 	payCreateTerminalID string
 
+	// capture delay flag
+	payCreateCaptureDelay string
+
 	// --with-lines flags
 	payCreateWithLines     bool
 	payCreateWithDiscount  bool
@@ -108,7 +111,11 @@ var paymentsCreateCmd = &cobra.Command{
 
 Add --with-discount to append a ~10% discount line; requires --with-lines.
 
---with-billing / --with-shipping attach a Dutch test address; override fields with --billing-* / --shipping-*.`,
+--with-billing / --with-shipping attach a Dutch test address; override fields with --billing-* / --shipping-*.
+
+--capture-delay delays the automatic capture of an authorized payment by the given
+duration, e.g. --capture-delay "8 hours" or --capture-delay "2 days". Only "... hours"
+and "... days" are accepted (max 7 days); requires --capture-mode automatic.`,
 	RunE:        runPaymentsCreate,
 	Annotations: map[string]string{"usesDefaults": "true"},
 }
@@ -154,6 +161,7 @@ func init() {
 	paymentsCreateCmd.Flags().StringVar(&payCreateCaptureMode, "capture-mode", "", "Capture mode: automatic or manual")
 	paymentsCreateCmd.Flags().StringVar(&payCreateLocale, "locale", "", "Locale for the payment, e.g. en_US, nl_NL (determines checkout language)")
 	paymentsCreateCmd.Flags().StringVar(&payCreateTerminalID, "terminal-id", "", "Terminal ID for point-of-sale payments")
+	paymentsCreateCmd.Flags().StringVar(&payCreateCaptureDelay, "capture-delay", "", "Delay before auto-capturing an authorized payment, e.g. \"8 hours\", \"2 days\" (max 7 days; requires --capture-mode automatic)")
 
 	// --with-lines flags
 	paymentsCreateCmd.Flags().BoolVar(&payCreateWithLines, "with-lines", false, "Auto-generate order lines summing to --amount (always 2 item lines + 1 shipping line)")
@@ -256,6 +264,9 @@ func runPaymentsCreate(cmd *cobra.Command, _ []string) error {
 		if v, ok := input.Str(jsonInput, "terminalId"); ok && !cmd.Flags().Changed("terminal-id") {
 			payCreateTerminalID = v
 		}
+		if v, ok := input.Str(jsonInput, "captureDelay"); ok && !cmd.Flags().Changed("capture-delay") {
+			payCreateCaptureDelay = v
+		}
 		if v, ok := input.RawJSON(jsonInput, "metadata"); ok && !cmd.Flags().Changed("metadata") {
 			payCreateMetadata = v
 		}
@@ -323,6 +334,7 @@ func runPaymentsCreate(cmd *cobra.Command, _ []string) error {
 	req.Locale = nil
 	req.Metadata = nil
 	req.TerminalID = nil
+	req.CaptureDelay = nil
 
 	if payCreateWebhookURL != "" {
 		req.WebhookURL = &payCreateWebhookURL
@@ -349,6 +361,9 @@ func runPaymentsCreate(cmd *cobra.Command, _ []string) error {
 	}
 	if payCreateTerminalID != "" {
 		req.TerminalID = &payCreateTerminalID
+	}
+	if payCreateCaptureDelay != "" {
+		req.CaptureDelay = &payCreateCaptureDelay
 	}
 	if payCreateMetadata != "" {
 		meta, err := parseMetadata(payCreateMetadata)
@@ -946,9 +961,9 @@ func parseMetadata(raw string) (components.Metadata, error) {
 // from being forwarded.
 //
 // Fields that have a direct CLI flag (amount, currency, description,
-// redirectUrl, webhookUrl, method, sequenceType, captureMode, locale,
-// metadata, customerId) are applied separately by the caller and are not
-// touched here.
+// redirectUrl, webhookUrl, method, sequenceType, captureMode, captureDelay,
+// locale, metadata, customerId, terminalId) are applied separately by the
+// caller and are not touched here.
 func seedPassThroughFields(req *components.PaymentRequest, m map[string]json.RawMessage) {
 	// ── Addresses ────────────────────────────────────────────────────────────
 	if raw, ok := m["billingAddress"]; ok {
@@ -992,9 +1007,6 @@ func seedPassThroughFields(req *components.PaymentRequest, m map[string]json.Raw
 	}
 	if raw, ok := m["restrictPaymentMethodsToCountry"]; ok {
 		strField(raw, &req.RestrictPaymentMethodsToCountry)
-	}
-	if raw, ok := m["captureDelay"]; ok {
-		strField(raw, &req.CaptureDelay)
 	}
 	if raw, ok := m["mandateId"]; ok {
 		strField(raw, &req.MandateID)
