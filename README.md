@@ -470,6 +470,12 @@ mollie sessions create [flags]
 mollie sessions get <session-id>
 ```
 
+`--required-customer-details` tells the [Express Component](https://docs.mollie.com/docs/collect-customer-details-with-express-component) which customer details to collect before checkout; pass a comma-separated list of `email`, `billing-address`, `shipping-address`:
+
+```bash
+mollie sessions create ... --required-customer-details "email,shipping-address"
+```
+
 ### `webhooks` — webhook subscriptions
 
 ```

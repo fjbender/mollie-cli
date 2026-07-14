@@ -165,6 +165,24 @@ func Amount(m map[string]json.RawMessage, key string) (value, currency string, o
 	return a.Value, a.Currency, true
 }
 
+// StrSlice extracts a []string value from a JSON field map.
+// Returns (nil, false) when m is nil, when key is absent, or when the value
+// is not a JSON array of strings.
+func StrSlice(m map[string]json.RawMessage, key string) ([]string, bool) {
+	if m == nil {
+		return nil, false
+	}
+	raw, ok := m[key]
+	if !ok {
+		return nil, false
+	}
+	var s []string
+	if err := json.Unmarshal(raw, &s); err != nil {
+		return nil, false
+	}
+	return s, true
+}
+
 // RawJSON returns the raw JSON bytes for a key as a string.
 // This is particularly useful for metadata fields, which the CLI stores as a
 // raw JSON string before passing to parseMetadata.

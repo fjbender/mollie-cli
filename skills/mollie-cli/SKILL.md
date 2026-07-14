@@ -90,6 +90,14 @@ mollie payments create --amount 25.00 --currency EUR \
   --capture-mode automatic --capture-delay "8 hours"
 ```
 
+### Create a session requiring customer details (Express Component)
+```bash
+# Values: email, billing-address, shipping-address (comma-separated)
+mollie sessions create --amount 25.00 --currency EUR \
+  --description "Order" --redirect-url https://example.com/return \
+  --required-customer-details "email,shipping-address"
+```
+
 ### Refund a payment
 ```bash
 # Full refund (payment-id is a positional argument):

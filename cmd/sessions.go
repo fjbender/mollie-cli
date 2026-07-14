@@ -1,15 +1,20 @@
 package cmd
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"math"
+	"net/http"
 	"strconv"
+	"strings"
 
+	"github.com/fjbender/mollie-cli/internal/config"
 	"github.com/fjbender/mollie-cli/internal/input"
 	"github.com/fjbender/mollie-cli/internal/mollieclient"
 	"github.com/fjbender/mollie-cli/internal/output"
+	"github.com/fjbender/mollie-cli/internal/verbose"
 	"github.com/mollie/mollie-api-golang/models/components"
 	"github.com/spf13/cobra"
 )
@@ -26,6 +31,9 @@ var (
 	sessCreateCustomerID   string
 	sessCreateSequenceType string
 	sessCreateMetadata     string
+
+	// beta field not yet supported by the SDK (see createSessionRaw)
+	sessCreateRequiredCustomerDetails string
 
 	// --with-lines flags
 	sessCreateWithLines     bool
@@ -99,6 +107,7 @@ func init() {
 	sessionsCreateCmd.Flags().StringVar(&sessCreateCustomerID, "customer-id", "", "Link this session to a Customer ID")
 	sessionsCreateCmd.Flags().StringVar(&sessCreateSequenceType, "sequence-type", "", "Sequence type: oneoff or first")
 	sessionsCreateCmd.Flags().StringVar(&sessCreateMetadata, "metadata", "", "Arbitrary JSON object metadata to attach to the session")
+	sessionsCreateCmd.Flags().StringVar(&sessCreateRequiredCustomerDetails, "required-customer-details", "", `Comma-separated details the Express Component must collect, e.g. "email,billing-address,shipping-address" (values: email, billing-address, shipping-address)`)
 
 	// --with-lines flags
 	sessionsCreateCmd.Flags().BoolVar(&sessCreateWithLines, "with-lines", true, "Auto-generate order lines summing to --amount (always 2 item lines + 1 shipping line); use --with-lines=false to suppress")
@@ -174,6 +183,9 @@ func runSessionsCreate(cmd *cobra.Command, _ []string) error {
 		if v, ok := input.RawJSON(jsonInput, "metadata"); ok && !cmd.Flags().Changed("metadata") {
 			sessCreateMetadata = v
 		}
+		if v, ok := input.StrSlice(jsonInput, "requiredCustomerDetails"); ok && !cmd.Flags().Changed("required-customer-details") {
+			sessCreateRequiredCustomerDetails = strings.Join(v, ",")
+		}
 	}
 
 	applyCreateDefaults(cmd,
@@ -190,6 +202,11 @@ func runSessionsCreate(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("required flag \"description\" not set and no default configured (run `mollie defaults set`)")
 	case sessCreateRedirectURL == "":
 		return fmt.Errorf("required flag \"redirect-url\" not set and no default configured (run `mollie defaults set`)")
+	}
+
+	requiredCustomerDetails, err := parseRequiredCustomerDetails(sessCreateRequiredCustomerDetails)
+	if err != nil {
+		return err
 	}
 
 	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile, flagVerbose)
@@ -246,11 +263,21 @@ func runSessionsCreate(cmd *cobra.Command, _ []string) error {
 		req.ShippingAddress = buildSessionShippingAddress()
 	}
 
-	resp, err := client.Sessions.Create(context.Background(), nil, req)
-	if err != nil {
-		return fmt.Errorf("creating session: %w", err)
+	var sess *components.SessionResponse
+	if len(requiredCustomerDetails) == 0 {
+		resp, err := client.Sessions.Create(context.Background(), nil, req)
+		if err != nil {
+			return fmt.Errorf("creating session: %w", err)
+		}
+		sess = resp.GetSessionResponse()
+	} else {
+		// requiredCustomerDetails is not yet supported by the SDK's
+		// SessionRequest — see createSessionRaw.
+		sess, err = createSessionRaw(context.Background(), req, requiredCustomerDetails)
+		if err != nil {
+			return fmt.Errorf("creating session: %w", err)
+		}
 	}
-	sess := resp.GetSessionResponse()
 	if sess == nil {
 		return fmt.Errorf("unexpected empty response from API")
 	}
@@ -547,4 +574,130 @@ func parseSessionMetadata(raw string) (map[string]any, error) {
 		return nil, fmt.Errorf("must be a valid JSON object: %w", err)
 	}
 	return m, nil
+}
+
+// validRequiredCustomerDetails are the values accepted by the
+// requiredCustomerDetails field. See
+// https://docs.mollie.com/docs/collect-customer-details-with-express-component.
+var validRequiredCustomerDetails = map[string]bool{
+	"email":            true,
+	"billing-address":  true,
+	"shipping-address": true,
+}
+
+// parseRequiredCustomerDetails splits --required-customer-details into
+// validated values. Returns (nil, nil) for an empty input.
+func parseRequiredCustomerDetails(raw string) ([]string, error) {
+	if raw == "" {
+		return nil, nil
+	}
+	parts := strings.Split(raw, ",")
+	values := make([]string, 0, len(parts))
+	for _, p := range parts {
+		v := strings.TrimSpace(p)
+		if v == "" {
+			continue
+		}
+		if !validRequiredCustomerDetails[v] {
+			return nil, fmt.Errorf("invalid --required-customer-details value %q (must be one of: email, billing-address, shipping-address)", v)
+		}
+		values = append(values, v)
+	}
+	return values, nil
+}
+
+// createSessionRaw creates a session via a raw HTTP request rather than the
+// SDK's client.Sessions.Create, because mollie-api-golang's SessionRequest
+// does not yet support requiredCustomerDetails — a newer field the Go SDK
+// hasn't caught up with. It re-serializes req (built exactly as it would be
+// for the SDK call) and merges in requiredCustomerDetails before sending.
+//
+// For organization access tokens, the SDK also auto-injects profileId and
+// testmode into the request body via an internal BeforeRequest hook (see
+// mollie-api-golang's internal/hooks/molliehooks.go) — API keys don't need
+// this since they're already mode/profile-scoped. That hook only runs for
+// client.Sessions.Create, so it's replicated here to keep this path at
+// parity.
+//
+// Drop this in favour of the plain client.Sessions.Create call once the SDK
+// adds the field.
+func createSessionRaw(ctx context.Context, req *components.SessionRequest, requiredCustomerDetails []string) (*components.SessionResponse, error) {
+	body, err := json.Marshal(req)
+	if err != nil {
+		return nil, err
+	}
+	var fields map[string]any
+	if err := json.Unmarshal(body, &fields); err != nil {
+		return nil, err
+	}
+	fields["requiredCustomerDetails"] = requiredCustomerDetails
+
+	key := cfg.APIKey
+	if flagAPIKey != "" {
+		key = flagAPIKey
+	}
+	if key == "" {
+		return nil, fmt.Errorf("no API key configured — run `mollie auth setup` to get started")
+	}
+
+	if !config.IsAPIKey(key) {
+		if _, exists := fields["profileId"]; !exists {
+			resolvedProfile := cfg.ProfileID
+			if flagProfile != "" {
+				resolvedProfile = flagProfile
+			}
+			if resolvedProfile != "" {
+				fields["profileId"] = resolvedProfile
+			}
+		}
+		if _, exists := fields["testmode"]; !exists {
+			fields["testmode"] = !flagLive
+		}
+	}
+
+	body, err = json.Marshal(fields)
+	if err != nil {
+		return nil, err
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, mollieAPIV2+"/sessions", bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	httpReq.Header.Set("Authorization", "Bearer "+key)
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Accept", "application/hal+json")
+	httpReq.Header.Set("User-Agent", "Mollie-CLI/1.0.0")
+
+	transport := http.DefaultTransport
+	if flagVerbose > 0 {
+		transport = &verbose.LoggingTransport{Level: flagVerbose, Inner: transport}
+	}
+	httpClient := &http.Client{Transport: transport}
+
+	resp, err := httpClient.Do(httpReq)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode >= 400 {
+		var apiErr struct {
+			Status int    `json:"status"`
+			Title  string `json:"title"`
+			Detail string `json:"detail"`
+		}
+		_ = json.NewDecoder(resp.Body).Decode(&apiErr)
+		msg := apiErr.Title
+		if apiErr.Detail != "" {
+			msg += " — " + apiErr.Detail
+		}
+		return nil, fmt.Errorf("API error %d: %s", resp.StatusCode, msg)
+	}
+
+	var sess components.SessionResponse
+	if err := json.NewDecoder(resp.Body).Decode(&sess); err != nil {
+		return nil, err
+	}
+	return &sess, nil
 }
