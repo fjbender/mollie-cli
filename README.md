@@ -327,6 +327,12 @@ mollie payments create ... \
 mollie payments create ... --metadata '{"order_id": "42", "source": "cli"}'
 ```
 
+`--capture-delay` delays the automatic capture of an authorized payment. Only `"... hours"` and `"... days"` are accepted (max 7 days), and it requires `--capture-mode automatic`:
+
+```bash
+mollie payments create ... --capture-mode automatic --capture-delay "8 hours"
+```
+
 ### `refunds` — refunds
 
 ```

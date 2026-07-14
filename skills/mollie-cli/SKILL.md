@@ -82,6 +82,14 @@ mollie payments create --amount 25.00 --currency EUR \
 
 Optional line tuning flags: `--lines-vat-rate 21.00` (default), `--lines-shipping-amount 4.99` (default)
 
+### Create a payment with delayed capture
+```bash
+# --capture-delay requires --capture-mode automatic; only "... hours" / "... days" (max 7 days)
+mollie payments create --amount 25.00 --currency EUR \
+  --description "Order" --redirect-url https://example.com/return \
+  --capture-mode automatic --capture-delay "8 hours"
+```
+
 ### Refund a payment
 ```bash
 # Full refund (payment-id is a positional argument):
