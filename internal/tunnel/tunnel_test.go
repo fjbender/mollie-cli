@@ -98,7 +98,7 @@ func TestStart_MissingBinaryReturnsError(t *testing.T) {
 func TestTunnel_KilledWhenContextCanceled(t *testing.T) {
 	path := fakeCloudflared(t, `
 echo "your url is: https://fake-words-9999.trycloudflare.com"
-sleep 30
+exec sleep 30
 `)
 
 	ctx, cancel := context.WithCancel(context.Background())
