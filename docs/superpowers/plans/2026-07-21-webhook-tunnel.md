@@ -600,7 +600,7 @@ func TestStart_MissingBinaryReturnsError(t *testing.T) {
 func TestTunnel_KilledWhenContextCanceled(t *testing.T) {
 	path := fakeCloudflared(t, `
 echo "your url is: https://fake-words-9999.trycloudflare.com"
-sleep 30
+exec sleep 30
 `)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -668,8 +668,10 @@ func ParseURL(line string) (string, bool) {
 
 // Tunnel represents a running cloudflared quick tunnel subprocess.
 type Tunnel struct {
-	URL string
-	cmd *exec.Cmd
+	URL      string
+	cmd      *exec.Cmd
+	waitDone chan struct{}
+	waitErr  error
 }
 
 // Start launches `cloudflared tunnel --url http://localhost:<port>` and waits
@@ -694,6 +696,23 @@ func Start(ctx context.Context, cloudflaredPath string, port int, waitTimeout ti
 		return nil, fmt.Errorf("starting cloudflared: %w", err)
 	}
 
+	// exec.Cmd never closes cmd.Stdout/Stderr itself when they're not
+	// *os.File — it only closes its own internal copy of the pipe. Since we
+	// gave it our io.Pipe writer, nothing closes pw when the process exits,
+	// which would otherwise leave the scanning goroutine below blocked on
+	// pr.Read() forever. This reaper goroutine calls cmd.Wait() exactly once
+	// (safe: it only returns after all output has already reached pw) and
+	// closes pw right after, unblocking the scanner. Tunnel.Wait() reads the
+	// result from here instead of calling cmd.Wait() a second time, which
+	// would otherwise fail with "Wait was already called".
+	waitDone := make(chan struct{})
+	tun := &Tunnel{cmd: cmd, waitDone: waitDone}
+	go func() {
+		tun.waitErr = cmd.Wait()
+		_ = pw.Close()
+		close(waitDone)
+	}()
+
 	urlCh := make(chan string, 1)
 	go func() {
 		sc := bufio.NewScanner(pr)
@@ -709,7 +728,8 @@ func Start(ctx context.Context, cloudflaredPath string, port int, waitTimeout ti
 
 	select {
 	case url := <-urlCh:
-		return &Tunnel{URL: url, cmd: cmd}, nil
+		tun.URL = url
+		return tun, nil
 	case <-time.After(waitTimeout):
 		_ = cmd.Process.Kill()
 		return nil, fmt.Errorf("timed out after %s waiting for cloudflared to report a tunnel URL", waitTimeout)
@@ -720,7 +740,8 @@ func Start(ctx context.Context, cloudflaredPath string, port int, waitTimeout ti
 
 // Wait blocks until the cloudflared subprocess exits.
 func (t *Tunnel) Wait() error {
-	return t.cmd.Wait()
+	<-t.waitDone
+	return t.waitErr
 }
 ```
 
