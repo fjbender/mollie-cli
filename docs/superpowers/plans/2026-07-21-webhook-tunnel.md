@@ -1141,9 +1141,9 @@ func cloudflaredInstallHint() string {
 	case "darwin":
 		return "Install it with: brew install cloudflared"
 	case "linux":
-		return "Install it with your package manager, e.g. `sudo apt install cloudflared`,\nor download a binary from https://github.com/cloudflare/cloudflared/releases"
+		return "cloudflared isn't in default OS repos. See https://pkg.cloudflare.com/index.html for apt/yum setup,\nor download a binary directly from https://github.com/cloudflare/cloudflared/releases"
 	case "windows":
-		return "Install it with: winget install --id Cloudflare.cloudflared\nor download a binary from https://github.com/cloudflare/cloudflared/releases"
+		return "Install it with: winget install --exact --id Cloudflare.cloudflared\nor download a binary from https://github.com/cloudflare/cloudflared/releases"
 	default:
 		return "Download a binary for your platform from https://github.com/cloudflare/cloudflared/releases"
 	}
@@ -1151,7 +1151,7 @@ func cloudflaredInstallHint() string {
 
 func runWebhookTunnel(_ *cobra.Command, _ []string) error {
 	if flagLive {
-		return errors.New("webhook-tunnel does not support --live yet; test mode only")
+		return errors.New("webhook-tunnel only supports test mode for now — it won't run against a live-mode credential")
 	}
 
 	if _, err := exec.LookPath("cloudflared"); err != nil {
@@ -1177,7 +1177,7 @@ Expected: no errors.
 go run . webhook-tunnel --live
 ```
 
-Expected: exits with `Error: webhook-tunnel does not support --live yet; test mode only`.
+Expected: exits with `Error: webhook-tunnel only supports test mode for now — it won't run against a live-mode credential`.
 
 ```bash
 go run . webhook-tunnel
@@ -1462,9 +1462,9 @@ func cloudflaredInstallHint() string {
 	case "darwin":
 		return "Install it with: brew install cloudflared"
 	case "linux":
-		return "Install it with your package manager, e.g. `sudo apt install cloudflared`,\nor download a binary from https://github.com/cloudflare/cloudflared/releases"
+		return "cloudflared isn't in default OS repos. See https://pkg.cloudflare.com/index.html for apt/yum setup,\nor download a binary directly from https://github.com/cloudflare/cloudflared/releases"
 	case "windows":
-		return "Install it with: winget install --id Cloudflare.cloudflared\nor download a binary from https://github.com/cloudflare/cloudflared/releases"
+		return "Install it with: winget install --exact --id Cloudflare.cloudflared\nor download a binary from https://github.com/cloudflare/cloudflared/releases"
 	default:
 		return "Download a binary for your platform from https://github.com/cloudflare/cloudflared/releases"
 	}
@@ -1575,7 +1575,7 @@ func printEvent(ev webhookserver.Event) {
 
 func runWebhookTunnel(_ *cobra.Command, _ []string) error {
 	if flagLive {
-		return errors.New("webhook-tunnel does not support --live yet; test mode only")
+		return errors.New("webhook-tunnel only supports test mode for now — it won't run against a live-mode credential")
 	}
 
 	cloudflaredPath, err := exec.LookPath("cloudflared")
