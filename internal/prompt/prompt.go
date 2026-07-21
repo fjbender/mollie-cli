@@ -105,3 +105,36 @@ func ProfileSelect(profiles []ProfileOption) (string, error) {
 	}
 	return strings.TrimSpace(selected), nil
 }
+
+// SelectOption is a display-label / value pair used to populate a generic
+// selection list. T must be comparable — this matches the constraint on
+// huh.Select[T] itself.
+type SelectOption[T comparable] struct {
+	Label string
+	Value T
+}
+
+// Select presents the user with a titled list of options and returns the
+// selected value.
+func Select[T comparable](title string, options []SelectOption[T]) (T, error) {
+	opts := make([]huh.Option[T], 0, len(options))
+	for _, o := range options {
+		opts = append(opts, huh.NewOption(o.Label, o.Value))
+	}
+
+	var selected T
+	form := huh.NewForm(
+		huh.NewGroup(
+			huh.NewSelect[T]().
+				Title(title).
+				Options(opts...).
+				Value(&selected),
+		),
+	)
+
+	if err := form.Run(); err != nil {
+		var zero T
+		return zero, err
+	}
+	return selected, nil
+}
