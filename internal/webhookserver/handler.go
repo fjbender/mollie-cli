@@ -7,6 +7,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"io"
 	"net/http"
 	"time"
@@ -19,15 +20,28 @@ type Event struct {
 	Verified   bool
 }
 
+// maxBodyBytes caps how much of a request body this handler will read.
+// Mollie's webhook payloads are small JSON documents, but the local server
+// sits behind a public (if unguessable) tunnel URL — this bounds memory use
+// against an oversized POST from anyone who stumbles onto that URL.
+const maxBodyBytes = 10 << 20 // 10 MiB
+
 // Handler returns an http.Handler that reads each request's raw body,
 // verifies it against secret (skipped entirely when secret is ""), invokes
 // onEvent exactly once per request regardless of verification outcome, and
-// always responds 200 OK.
+// always responds 200 OK. A body over maxBodyBytes gets 413 instead; any
+// other read failure gets 400 — both skip the onEvent call entirely, since
+// there's no complete body to report.
 func Handler(secret string, onEvent func(Event)) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, err := io.ReadAll(r.Body)
+		body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBodyBytes))
 		if err != nil {
-			http.Error(w, "failed to read request body", http.StatusBadRequest)
+			var maxBytesErr *http.MaxBytesError
+			if errors.As(err, &maxBytesErr) {
+				http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+			} else {
+				http.Error(w, "failed to read request body", http.StatusBadRequest)
+			}
 			return
 		}
 

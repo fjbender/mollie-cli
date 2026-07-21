@@ -4,6 +4,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -98,5 +99,49 @@ func TestHandler_EmptySecretAlwaysUnverified(t *testing.T) {
 
 	if got.Verified {
 		t.Error("expected event to be unverified when no secret is known (foreign-subscription case)")
+	}
+}
+
+func TestHandler_OversizedBodyRejected(t *testing.T) {
+	oversized := strings.Repeat("a", 10<<20+1) // one byte over the 10 MiB cap
+
+	called := false
+	handler := webhookserver.Handler("whsec_test", func(webhookserver.Event) { called = true })
+
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(oversized))
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Errorf("status = %d, want %d", rec.Code, http.StatusRequestEntityTooLarge)
+	}
+	if called {
+		t.Error("expected onEvent not to be called for a rejected oversized body")
+	}
+}
+
+// errReader is an io.ReadCloser that always fails, simulating a body-read
+// error unrelated to size (e.g. a broken connection mid-request).
+type errReader struct{}
+
+func (errReader) Read([]byte) (int, error) { return 0, errors.New("simulated read error") }
+func (errReader) Close() error             { return nil }
+
+func TestHandler_BodyReadErrorRejected(t *testing.T) {
+	called := false
+	handler := webhookserver.Handler("whsec_test", func(webhookserver.Event) { called = true })
+
+	req := httptest.NewRequest(http.MethodPost, "/", nil)
+	req.Body = errReader{}
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+	if called {
+		t.Error("expected onEvent not to be called when the body can't be read")
 	}
 }
