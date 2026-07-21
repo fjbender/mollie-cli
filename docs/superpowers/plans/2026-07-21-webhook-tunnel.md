@@ -778,6 +778,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -874,6 +875,50 @@ func TestHandler_EmptySecretAlwaysUnverified(t *testing.T) {
 		t.Error("expected event to be unverified when no secret is known (foreign-subscription case)")
 	}
 }
+
+func TestHandler_OversizedBodyRejected(t *testing.T) {
+	oversized := strings.Repeat("a", 10<<20+1) // one byte over the 10 MiB cap
+
+	called := false
+	handler := webhookserver.Handler("whsec_test", func(webhookserver.Event) { called = true })
+
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(oversized))
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Errorf("status = %d, want %d", rec.Code, http.StatusRequestEntityTooLarge)
+	}
+	if called {
+		t.Error("expected onEvent not to be called for a rejected oversized body")
+	}
+}
+
+// errReader is an io.ReadCloser that always fails, simulating a body-read
+// error unrelated to size (e.g. a broken connection mid-request).
+type errReader struct{}
+
+func (errReader) Read([]byte) (int, error) { return 0, errors.New("simulated read error") }
+func (errReader) Close() error              { return nil }
+
+func TestHandler_BodyReadErrorRejected(t *testing.T) {
+	called := false
+	handler := webhookserver.Handler("whsec_test", func(webhookserver.Event) { called = true })
+
+	req := httptest.NewRequest(http.MethodPost, "/", nil)
+	req.Body = errReader{}
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+	if called {
+		t.Error("expected onEvent not to be called when the body can't be read")
+	}
+}
 ```
 
 - [ ] **Step 2: Run tests to confirm they fail**
@@ -905,6 +950,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"io"
 	"net/http"
 	"time"
@@ -917,15 +963,28 @@ type Event struct {
 	Verified   bool
 }
 
+// maxBodyBytes caps how much of a request body this handler will read.
+// Mollie's webhook payloads are small JSON documents, but the local server
+// sits behind a public (if unguessable) tunnel URL — this bounds memory use
+// against an oversized POST from anyone who stumbles onto that URL.
+const maxBodyBytes = 10 << 20 // 10 MiB
+
 // Handler returns an http.Handler that reads each request's raw body,
 // verifies it against secret (skipped entirely when secret is ""), invokes
 // onEvent exactly once per request regardless of verification outcome, and
-// always responds 200 OK.
+// always responds 200 OK. A body over maxBodyBytes gets 413 instead; any
+// other read failure gets 400 — both skip the onEvent call entirely, since
+// there's no complete body to report.
 func Handler(secret string, onEvent func(Event)) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, err := io.ReadAll(r.Body)
+		body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBodyBytes))
 		if err != nil {
-			http.Error(w, "failed to read request body", http.StatusBadRequest)
+			var maxBytesErr *http.MaxBytesError
+			if errors.As(err, &maxBytesErr) {
+				http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+			} else {
+				http.Error(w, "failed to read request body", http.StatusBadRequest)
+			}
 			return
 		}
 
@@ -960,7 +1019,7 @@ func verifySignature(secret string, body []byte, sig string) bool {
 go test ./internal/webhookserver/...
 ```
 
-Expected: all 4 tests pass.
+Expected: all 6 tests pass.
 
 - [ ] **Step 6: Commit**
 
