@@ -157,6 +157,42 @@ func restoreSnapshot(ctx context.Context, c *whClient, snap *tunnelstate.Subscri
 	return c.mutate(ctx, http.MethodPatch, "/webhooks/"+snap.ID, body, nil)
 }
 
+// webhookURLRetryAttempts and webhookURLRetryDelay bound how long we'll
+// tolerate Mollie rejecting a webhook create/update because it can't yet
+// resolve the tunnel's hostname. A freshly-started cloudflared quick tunnel
+// is usually resolvable within a few seconds, but not always instantly —
+// Mollie validates the URL synchronously when the subscription is
+// created/patched, so a request fired immediately after cloudflared reports
+// its URL can fail with a DNS-lookup error that has nothing to do with the
+// request itself.
+const (
+	webhookURLRetryAttempts = 5
+	webhookURLRetryDelay    = 2 * time.Second
+)
+
+// retryTunnelWebhookCall retries fn up to webhookURLRetryAttempts times,
+// waiting webhookURLRetryDelay between attempts, to absorb the tunnel-DNS-
+// not-ready-yet failure described above. It gives up and returns the last
+// error once attempts are exhausted, or immediately if ctx is canceled
+// while waiting between attempts.
+func retryTunnelWebhookCall(ctx context.Context, fn func() error) error {
+	var err error
+	for attempt := 1; attempt <= webhookURLRetryAttempts; attempt++ {
+		if err = fn(); err == nil {
+			return nil
+		}
+		if attempt < webhookURLRetryAttempts {
+			fmt.Printf("  Attempt %d/%d failed (%v) — the tunnel may not be resolvable yet, retrying...\n", attempt, webhookURLRetryAttempts, err)
+			select {
+			case <-time.After(webhookURLRetryDelay):
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+	}
+	return err
+}
+
 // printEvent logs a single received webhook event to stdout.
 func printEvent(ev webhookserver.Event) {
 	badge := "unverified"
@@ -275,7 +311,9 @@ func runWebhookTunnel(_ *cobra.Command, _ []string) error {
 		}
 
 		var wh whWebhook
-		if err := c.mutate(ctx, http.MethodPost, "/webhooks", body, &wh); err != nil {
+		if err := retryTunnelWebhookCall(ctx, func() error {
+			return c.mutate(ctx, http.MethodPost, "/webhooks", body, &wh)
+		}); err != nil {
 			return fmt.Errorf("creating webhook subscription: %w", err)
 		}
 		created = &wh
@@ -352,7 +390,9 @@ func runWebhookTunnel(_ *cobra.Command, _ []string) error {
 			tm := true
 			patchBody.Testmode = &tm
 		}
-		if err := c.mutate(ctx, http.MethodPatch, "/webhooks/"+chosen.ID, patchBody, nil); err != nil {
+		if err := retryTunnelWebhookCall(ctx, func() error {
+			return c.mutate(ctx, http.MethodPatch, "/webhooks/"+chosen.ID, patchBody, nil)
+		}); err != nil {
 			return fmt.Errorf("repointing webhook subscription %s: %w", chosen.ID, err)
 		}
 
