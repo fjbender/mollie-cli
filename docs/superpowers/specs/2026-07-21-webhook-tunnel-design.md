@@ -100,7 +100,7 @@ Beta event types (`dispute.*`, `file.*`, `unmatched-credit-transfer.*`, `connect
 Resolution (`webhookevents.Resolve(ctx, sdkClient, isAPIKey bool) ([]string, error)`):
 
 - **API key** (`test_`/`live_` prefix) → these are fully privileged and the Permissions API rejects them anyway (Advanced/OAuth tokens only) → return the full table's event types directly, no API call.
-- **Access token** → call the SDK's existing `client.Permissions.List(ctx, nil)` (already supported by `mollie-api-golang`, no bypass needed), collect the set of `ID`s where `Granted == true`, and return only the table's event types whose required permission is in that set. This call always uses a live-mode SDK client, regardless of the mode the rest of the command runs in — the Permissions API only works against live mode. Safe to force silently: it's a read-only GET reporting the token's permissions, not mode-specific data.
+- **Access token** → call the SDK's existing `client.Permissions.List(ctx, nil)` (already supported by `mollie-api-golang`, no bypass needed), collect the set of `ID`s where `Granted == true`, and return only the table's event types whose required permission is in that set. This call always uses `mollieclient.NewOrganizationClient` (the same minimal client already used for Invoices), never the regular per-command client — the Permissions API only works against live mode and rejects a profileId, regardless of the mode/profile the rest of the command runs with. Safe to do silently: it's a read-only GET reporting the token's permissions, not mode- or profile-specific data.
 
 This is the resolved list passed as `eventTypes` on the create/recreate/patch call whenever `--event-types` wasn't explicitly given.
 

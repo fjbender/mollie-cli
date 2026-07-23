@@ -1360,12 +1360,14 @@ func resolveEventTypes(ctx context.Context) ([]string, error) {
 		return webhookevents.Resolve(ctx, true, nil)
 	}
 
-	// The Permissions API only works against live mode, regardless of which
-	// mode the rest of this command runs in — force it here. Safe: this is a
-	// read-only GET reporting which permissions the token has, not
-	// mode-specific data, so it doesn't matter that webhook-tunnel itself is
-	// test-mode only.
-	client, err := mollieclient.New(cfg, flagAPIKey, true, flagProfile, flagVerbose)
+	// The Permissions API only works against live mode and rejects a
+	// profileId, regardless of which mode/profile the rest of this command
+	// runs with — mollieclient.NewOrganizationClient already builds exactly
+	// this kind of minimal client (no WithTestmode, no WithProfileID), the
+	// same one used for Invoices for the same reason. Safe to use here: this
+	// is a read-only GET reporting which permissions the token has, not
+	// mode- or profile-specific data.
+	client, err := mollieclient.NewOrganizationClient(cfg, flagAPIKey, flagVerbose)
 	if err != nil {
 		return nil, err
 	}
@@ -1541,12 +1543,14 @@ func resolveEventTypes(ctx context.Context) ([]string, error) {
 		return webhookevents.Resolve(ctx, true, nil)
 	}
 
-	// The Permissions API only works against live mode, regardless of which
-	// mode the rest of this command runs in — force it here. Safe: this is a
-	// read-only GET reporting which permissions the token has, not
-	// mode-specific data, so it doesn't matter that webhook-tunnel itself is
-	// test-mode only.
-	client, err := mollieclient.New(cfg, flagAPIKey, true, flagProfile, flagVerbose)
+	// The Permissions API only works against live mode and rejects a
+	// profileId, regardless of which mode/profile the rest of this command
+	// runs with — mollieclient.NewOrganizationClient already builds exactly
+	// this kind of minimal client (no WithTestmode, no WithProfileID), the
+	// same one used for Invoices for the same reason. Safe to use here: this
+	// is a read-only GET reporting which permissions the token has, not
+	// mode- or profile-specific data.
+	client, err := mollieclient.NewOrganizationClient(cfg, flagAPIKey, flagVerbose)
 	if err != nil {
 		return nil, err
 	}
