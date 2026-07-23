@@ -108,7 +108,7 @@ This is the resolved list passed as `eventTypes` on the create/recreate/patch ca
 
 1. Start the local HTTP server bound to `--port` (not yet wired to Mollie).
 2. Spawn `cloudflared tunnel --url http://localhost:<port>` (new package `internal/tunnel`), scanning combined stdout/stderr for a `https://*.trycloudflare.com` URL with a bounded timeout (e.g. 20s); fail with a clear error if it never appears.
-3. Apply the subscription resolution above, using the tunnel URL.
+3. Apply the subscription resolution above, using the tunnel URL. The `POST`/`PATCH` call that actually points a subscription at the tunnel URL is retried a bounded number of times (5 attempts, 2s apart) before giving up — Mollie validates the URL synchronously when it's set, and a `cloudflared` quick tunnel's DNS record isn't always resolvable the instant the URL is reported, so the very first attempt can fail transiently for reasons unrelated to the request itself.
 4. Enter tail mode.
 5. On SIGINT/SIGTERM (`signal.NotifyContext`): restore (foreign case) or delete (ours/fresh case) the subscription, terminate the `cloudflared` subprocess (SIGTERM, short grace period, then kill), clear the state file's pending-restore entry on success.
 
