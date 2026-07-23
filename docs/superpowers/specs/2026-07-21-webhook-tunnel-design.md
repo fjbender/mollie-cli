@@ -106,17 +106,18 @@ This is the resolved list passed as `eventTypes` on the create/recreate/patch ca
 
 ## Tunnel Lifecycle
 
-1. Start the local HTTP server bound to `--port` (not yet wired to Mollie).
+1. Bind the local port up front, before any external side effect (tunnel or subscription mutation) — a busy `--port` fails fast with nothing else touched yet.
 2. Spawn `cloudflared tunnel --url http://localhost:<port>` (new package `internal/tunnel`), scanning combined stdout/stderr for a `https://*.trycloudflare.com` URL with a bounded timeout (e.g. 20s); fail with a clear error if it never appears.
-3. Apply the subscription resolution above, using the tunnel URL. The `POST`/`PATCH` call that actually points a subscription at the tunnel URL is retried a bounded number of times (5 attempts, 2s apart) before giving up — Mollie validates the URL synchronously when it's set, and a `cloudflared` quick tunnel's DNS record isn't always resolvable the instant the URL is reported, so the very first attempt can fail transiently for reasons unrelated to the request itself.
-4. Enter tail mode.
-5. On SIGINT/SIGTERM (`signal.NotifyContext`): restore (foreign case) or delete (ours/fresh case) the subscription, terminate the `cloudflared` subprocess (SIGTERM, short grace period, then kill), clear the state file's pending-restore entry on success.
+3. Start the local HTTP server on the already-bound port. This has to happen *before* the next step: Mollie validates a webhook subscription's URL synchronously on create/update, including expecting an HTTP 200 response, so something must already be listening behind the tunnel. For a freshly created subscription the signing secret isn't known until that same create call returns it, so the server starts with a secret-less handler (every event unverified) and swaps in the real handler the instant the secret is known — nothing genuine can reach the tunnel URL in that gap, since no subscription points at it yet.
+4. Apply the subscription resolution above, using the tunnel URL. The `POST`/`PATCH` call that actually points a subscription at the tunnel URL is retried a bounded number of times (5 attempts, 2s apart) before giving up — a `cloudflared` quick tunnel's DNS record isn't always resolvable the instant the URL is reported, so the very first attempt can fail transiently for reasons unrelated to the request itself.
+5. Enter tail mode.
+6. On SIGINT/SIGTERM (`signal.NotifyContext`): restore (foreign case) or delete (ours/fresh case) the subscription, terminate the `cloudflared` subprocess (SIGTERM, short grace period, then kill), clear the state file's pending-restore entry on success.
 
 ## Signature Verification
 
 The `webhookSecret` is only ever returned in a `POST /webhooks` **create** response — never on `GET`/`PATCH`/`LIST`. This means:
 
-- **Free slot / ours** (always freshly created) → secret is known → verify every incoming `X-Mollie-Signature` header as HMAC-SHA256 over the raw request body, compared with `hmac.Equal` (timing-safe). Requests that fail verification are still logged, but clearly marked invalid, and are not treated as authentic Mollie events.
+- **Free slot / ours** (always freshly created) → secret is known once the create call succeeds → verify every incoming `X-Mollie-Signature` header as HMAC-SHA256 over the raw request body, compared with `hmac.Equal` (timing-safe). Requests that fail verification are still logged, but clearly marked invalid, and are not treated as authentic Mollie events. Between the server starting and the create call succeeding, the handler briefly runs secret-less (see Tunnel Lifecycle above); this is harmless since no subscription points at the tunnel yet during that window.
 - **Foreign (patched in place)** → secret is never known to us (rotating it would require deleting and recreating the subscription, which would silently break the secret its actual owner uses to verify it downstream — permanently, even after we restore the URL — so we never do this by default) → verification is skipped; every event in this mode is tagged `unverified` in the tail output, and a one-time warning banner is shown when the session starts in this mode.
 
 ## Tail Output (v1)

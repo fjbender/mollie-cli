@@ -1428,6 +1428,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"runtime"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -1609,6 +1610,29 @@ func retryTunnelWebhookCall(ctx context.Context, fn func() error) error {
 	return err
 }
 
+// handlerSwap lets the local server's handler be replaced after the server
+// has already started serving requests. This is needed because Mollie
+// validates a webhook subscription's URL synchronously when it's
+// created/patched — including expecting an HTTP 200 response — so the local
+// server must already be serving before that call is made. But for a freshly
+// created subscription, the signing secret needed for signature verification
+// isn't known until that same call succeeds. handlerSwap lets the server
+// start with a secret-less handler (every event unverified) and be swapped
+// for the real one the instant the secret becomes known.
+type handlerSwap struct {
+	h atomic.Pointer[http.Handler]
+}
+
+// Store replaces the handler used for all subsequent requests.
+func (s *handlerSwap) Store(h http.Handler) {
+	s.h.Store(&h)
+}
+
+// ServeHTTP delegates to whichever handler was most recently stored.
+func (s *handlerSwap) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	(*s.h.Load()).ServeHTTP(w, r)
+}
+
 // printEvent logs a single received webhook event to stdout.
 func printEvent(ev webhookserver.Event) {
 	badge := "unverified"
@@ -1703,6 +1727,21 @@ func runWebhookTunnel(_ *cobra.Command, _ []string) error {
 	}
 	fmt.Printf("✓ Tunnel ready: %s\n", t.URL)
 
+	// The local server must already be serving before the subscription is
+	// created/patched below — Mollie's create/update validates the URL
+	// synchronously, including expecting an HTTP 200, so cloudflared needs
+	// somewhere live to forward that validation request to right now. The
+	// handler starts out secret-less; the actionCreateFresh/actionRecreateOwned
+	// case swaps in the real one the moment a fresh secret is known.
+	var handler handlerSwap
+	handler.Store(webhookserver.Handler("", printEvent))
+	server := &http.Server{Handler: &handler}
+	go func() {
+		if err := server.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			fmt.Fprintf(os.Stderr, "local server error: %v\n", err)
+		}
+	}()
+
 	var (
 		secret  string
 		created *whWebhook
@@ -1734,6 +1773,7 @@ func runWebhookTunnel(_ *cobra.Command, _ []string) error {
 		}
 		created = &wh
 		secret = wh.WebhookSecret
+		handler.Store(webhookserver.Handler(secret, printEvent))
 		envState.OwnedSubscriptionID = wh.ID
 		if err := tunnelstate.Save(state); err != nil {
 			return fmt.Errorf("saving tunnel state: %w", err)
@@ -1814,15 +1854,6 @@ func runWebhookTunnel(_ *cobra.Command, _ []string) error {
 
 		fmt.Printf("⚠ Repointed existing subscription %q — its signing secret is unknown, so incoming events cannot be verified this session.\n", chosen.Name)
 	}
-
-	server := &http.Server{
-		Handler: webhookserver.Handler(secret, printEvent),
-	}
-	go func() {
-		if err := server.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			fmt.Fprintf(os.Stderr, "local server error: %v\n", err)
-		}
-	}()
 
 	fmt.Println("Listening for webhook events. Press Ctrl-C to stop.")
 	<-ctx.Done()
