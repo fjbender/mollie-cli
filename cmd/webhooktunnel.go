@@ -1,17 +1,28 @@
+// cmd/webhooktunnel.go
 package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"os"
 	"os/exec"
+	"os/signal"
 	"runtime"
+	"syscall"
+	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/fjbender/mollie-cli/internal/config"
 	"github.com/fjbender/mollie-cli/internal/mollieclient"
+	"github.com/fjbender/mollie-cli/internal/prompt"
+	"github.com/fjbender/mollie-cli/internal/tunnel"
+	"github.com/fjbender/mollie-cli/internal/tunnelstate"
 	"github.com/fjbender/mollie-cli/internal/webhookevents"
+	"github.com/fjbender/mollie-cli/internal/webhookserver"
 )
 
 var (
@@ -122,15 +133,237 @@ func resolveEventTypes(ctx context.Context) ([]string, error) {
 	return webhookevents.Resolve(ctx, false, client.Permissions)
 }
 
+// restoreSnapshot patches a webhook subscription back to a previously
+// captured state. It never needs the subscription's signing secret — PATCH
+// doesn't change it.
+func restoreSnapshot(ctx context.Context, c *whClient, snap *tunnelstate.SubscriptionSnapshot) error {
+	body := whUpdateBody{
+		Name:       &snap.Name,
+		URL:        &snap.URL,
+		EventTypes: snap.EventTypes,
+	}
+	if c.needsTestmode() {
+		t := true
+		body.Testmode = &t
+	}
+	return c.mutate(ctx, http.MethodPatch, "/webhooks/"+snap.ID, body, nil)
+}
+
+// printEvent logs a single received webhook event to stdout.
+func printEvent(ev webhookserver.Event) {
+	badge := "unverified"
+	if ev.Verified {
+		badge = "verified"
+	}
+
+	var e whEvent
+	if err := json.Unmarshal(ev.Body, &e); err != nil {
+		fmt.Printf("%s  (unparseable body: %v)  [%s]\n", ev.ReceivedAt.Format(time.RFC3339), err, badge)
+		return
+	}
+	fmt.Printf("%s  %-28s  %-30s  [%s]\n", ev.ReceivedAt.Format(time.RFC3339), e.Type, e.EntityID, badge)
+}
+
 func runWebhookTunnel(_ *cobra.Command, _ []string) error {
 	if flagLive {
 		return errors.New("webhook-tunnel only supports test mode for now — it won't run against a live-mode credential")
 	}
 
-	if _, err := exec.LookPath("cloudflared"); err != nil {
+	cloudflaredPath, err := exec.LookPath("cloudflared")
+	if err != nil {
 		return fmt.Errorf("cloudflared not found on PATH: %w\n\n%s", err, cloudflaredInstallHint())
 	}
 
-	fmt.Println("Preflight checks passed.")
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	envFile, err := config.LoadFile()
+	if err != nil {
+		return fmt.Errorf("loading config: %w", err)
+	}
+	envName := envFile.ActiveEnvName()
+
+	state, err := tunnelstate.Load()
+	if err != nil {
+		return fmt.Errorf("loading tunnel state: %w", err)
+	}
+	envState := state.Get(envName)
+
+	c := newWhClient()
+
+	if envState.PendingRestore != nil {
+		fmt.Printf("A previous webhook-tunnel session for %q didn't shut down cleanly.\n", envName)
+		restore, err := prompt.Confirm(fmt.Sprintf("Restore webhook subscription %q to its original URL before continuing?", envState.PendingRestore.Name))
+		if err != nil {
+			return err
+		}
+		if restore {
+			if err := restoreSnapshot(ctx, c, envState.PendingRestore); err != nil {
+				return fmt.Errorf("restoring previous subscription: %w", err)
+			}
+			envState.PendingRestore = nil
+			if err := tunnelstate.Save(state); err != nil {
+				return fmt.Errorf("saving tunnel state: %w", err)
+			}
+			fmt.Println("✓ Restored.")
+		}
+	}
+
+	var list whWebhookList
+	if err := c.get(ctx, "/webhooks", nil, &list); err != nil {
+		return fmt.Errorf("listing webhook subscriptions: %w", err)
+	}
+
+	action := resolveSubscriptionAction(list.Embedded.Webhooks, envState.OwnedSubscriptionID)
+
+	eventTypes, err := resolveEventTypes(ctx)
+	if err != nil {
+		return fmt.Errorf("resolving event types: %w", err)
+	}
+	if len(eventTypes) == 0 {
+		return errors.New("no event types available to subscribe to — the current credential has no granted permissions for any known event type")
+	}
+
+	fmt.Printf("Starting tunnel on port %d...\n", whtPort)
+	t, err := tunnel.Start(ctx, cloudflaredPath, whtPort, 20*time.Second)
+	if err != nil {
+		return fmt.Errorf("starting cloudflared tunnel: %w", err)
+	}
+	fmt.Printf("✓ Tunnel ready: %s\n", t.URL)
+
+	var (
+		secret  string
+		created *whWebhook
+	)
+
+	switch action.Kind {
+	case actionCreateFresh, actionRecreateOwned:
+		if action.Kind == actionRecreateOwned {
+			if err := c.mutate(ctx, http.MethodDelete, "/webhooks/"+action.Existing.ID, c.testmodeBody(), nil); err != nil {
+				return fmt.Errorf("deleting previous mollie-cli subscription: %w", err)
+			}
+		}
+
+		body := whCreateBody{
+			Name:       "mollie-cli webhook-tunnel",
+			URL:        t.URL,
+			EventTypes: eventTypes,
+		}
+		if c.needsTestmode() {
+			tm := true
+			body.Testmode = &tm
+		}
+
+		var wh whWebhook
+		if err := c.mutate(ctx, http.MethodPost, "/webhooks", body, &wh); err != nil {
+			return fmt.Errorf("creating webhook subscription: %w", err)
+		}
+		created = &wh
+		secret = wh.WebhookSecret
+		envState.OwnedSubscriptionID = wh.ID
+		if err := tunnelstate.Save(state); err != nil {
+			return fmt.Errorf("saving tunnel state: %w", err)
+		}
+
+		fmt.Printf("✓ Webhook subscription %s created — signature verification enabled\n", wh.ID)
+		fmt.Printf("  Signing secret: %s\n", secret)
+
+	case actionPickForeign:
+		opts := make([]prompt.SelectOption[string], 0, len(list.Embedded.Webhooks))
+		for _, wh := range list.Embedded.Webhooks {
+			opts = append(opts, prompt.SelectOption[string]{
+				Label: fmt.Sprintf("%s — %s (%s)", wh.Name, truncateURL(wh.URL, 50), summarizeEventTypes(wh.EventTypes)),
+				Value: wh.ID,
+			})
+		}
+		chosenID, err := prompt.Select("Both test-mode webhook slots are in use. Which one should be temporarily repointed to the tunnel?", opts)
+		if err != nil {
+			return err
+		}
+
+		var chosen *whWebhook
+		for i := range list.Embedded.Webhooks {
+			if list.Embedded.Webhooks[i].ID == chosenID {
+				chosen = &list.Embedded.Webhooks[i]
+				break
+			}
+		}
+		if chosen == nil {
+			return fmt.Errorf("selected webhook %s not found", chosenID)
+		}
+
+		envState.PendingRestore = &tunnelstate.SubscriptionSnapshot{
+			ID:         chosen.ID,
+			Name:       chosen.Name,
+			URL:        chosen.URL,
+			EventTypes: chosen.EventTypes,
+		}
+		if err := tunnelstate.Save(state); err != nil {
+			return fmt.Errorf("saving tunnel state: %w", err)
+		}
+
+		patchBody := whUpdateBody{URL: &t.URL}
+		if whtEventTypes != "" {
+			patchBody.EventTypes = eventTypes
+		}
+		if c.needsTestmode() {
+			tm := true
+			patchBody.Testmode = &tm
+		}
+		if err := c.mutate(ctx, http.MethodPatch, "/webhooks/"+chosen.ID, patchBody, nil); err != nil {
+			return fmt.Errorf("repointing webhook subscription %s: %w", chosen.ID, err)
+		}
+
+		fmt.Printf("⚠ Repointed existing subscription %q — its signing secret is unknown, so incoming events cannot be verified this session.\n", chosen.Name)
+	}
+
+	server := &http.Server{
+		Addr:    fmt.Sprintf("localhost:%d", whtPort),
+		Handler: webhookserver.Handler(secret, printEvent),
+	}
+	go func() {
+		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			fmt.Fprintf(os.Stderr, "local server error: %v\n", err)
+		}
+	}()
+
+	fmt.Println("Listening for webhook events. Press Ctrl-C to stop.")
+	<-ctx.Done()
+	fmt.Println("\nShutting down...")
+
+	shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancelShutdown()
+	_ = server.Shutdown(shutdownCtx)
+
+	cleanupCtx, cancelCleanup := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancelCleanup()
+
+	switch action.Kind {
+	case actionPickForeign:
+		if envState.PendingRestore != nil {
+			if err := restoreSnapshot(cleanupCtx, c, envState.PendingRestore); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: failed to restore original webhook subscription: %v\n", err)
+				fmt.Fprintln(os.Stderr, "Run `mollie webhook-tunnel` again to retry automatically, or fix it manually with `mollie webhooks update`.")
+			} else {
+				envState.PendingRestore = nil
+				fmt.Println("✓ Restored original webhook subscription.")
+			}
+		}
+	default:
+		if created != nil {
+			if err := c.mutate(cleanupCtx, http.MethodDelete, "/webhooks/"+created.ID, c.testmodeBody(), nil); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: failed to delete temporary webhook subscription %s: %v\n", created.ID, err)
+			} else {
+				envState.OwnedSubscriptionID = ""
+			}
+		}
+	}
+
+	if err := tunnelstate.Save(state); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: failed to save tunnel state: %v\n", err)
+	}
+
+	_ = t.Wait() // cloudflared is killed automatically because ctx was canceled
+
 	return nil
 }
