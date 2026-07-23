@@ -127,7 +127,12 @@ func resolveEventTypes(ctx context.Context) ([]string, error) {
 		return webhookevents.Resolve(ctx, true, nil)
 	}
 
-	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile, flagVerbose)
+	// The Permissions API only works against live mode, regardless of which
+	// mode the rest of this command runs in — force it here. Safe: this is a
+	// read-only GET reporting which permissions the token has, not
+	// mode-specific data, so it doesn't matter that webhook-tunnel itself is
+	// test-mode only.
+	client, err := mollieclient.New(cfg, flagAPIKey, true, flagProfile, flagVerbose)
 	if err != nil {
 		return nil, err
 	}
