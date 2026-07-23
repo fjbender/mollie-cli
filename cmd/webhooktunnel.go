@@ -190,7 +190,7 @@ func runWebhookTunnel(_ *cobra.Command, _ []string) error {
 	if err != nil {
 		return fmt.Errorf("cannot bind local port %d (is it already in use?): %w", whtPort, err)
 	}
-	defer func() { _ = ln.Close() }() // harmless if server.Serve already closed it
+	defer func() { _ = ln.Close() }() // harmless if server.Shutdown already closed it
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -310,19 +310,33 @@ func runWebhookTunnel(_ *cobra.Command, _ []string) error {
 			return fmt.Errorf("selected webhook %s not found", chosenID)
 		}
 
-		if envState.PendingRestore != nil && envState.PendingRestore.ID != chosen.ID {
+		switch {
+		case envState.PendingRestore == nil:
+			envState.PendingRestore = &tunnelstate.SubscriptionSnapshot{
+				ID:         chosen.ID,
+				Name:       chosen.Name,
+				URL:        chosen.URL,
+				EventTypes: chosen.EventTypes,
+			}
+		case envState.PendingRestore.ID == chosen.ID:
+			// Re-picking the very subscription an earlier crash already left
+			// mid-repoint — keep its original pre-crash snapshot. Re-snapshotting
+			// its current (already-repointed) state here would make a future
+			// restore a no-op back to the broken tunnel URL instead of the truth.
+			fmt.Println("Reusing the existing restore snapshot for this subscription from an earlier session.")
+		default:
 			// The user declined the earlier "restore from a previous crash?"
-			// prompt, and is now about to repoint a different (or the same,
-			// already-broken) subscription. Overwriting silently would lose
-			// the only record of what the original crash needs restored to.
-			fmt.Fprintf(os.Stderr, "warning: discarding an unresolved restore snapshot for %q — restore it first with a future run if you still need it.\n", envState.PendingRestore.Name)
-		}
-
-		envState.PendingRestore = &tunnelstate.SubscriptionSnapshot{
-			ID:         chosen.ID,
-			Name:       chosen.Name,
-			URL:        chosen.URL,
-			EventTypes: chosen.EventTypes,
+			// prompt and is now repointing a *different* subscription.
+			// Overwriting happens immediately below — there is no later chance
+			// to recover the discarded snapshot, so say so plainly rather than
+			// implying a future run could still restore it.
+			fmt.Fprintf(os.Stderr, "warning: discarding the unresolved restore snapshot for %q — its original pre-repoint state is now permanently lost.\n", envState.PendingRestore.Name)
+			envState.PendingRestore = &tunnelstate.SubscriptionSnapshot{
+				ID:         chosen.ID,
+				Name:       chosen.Name,
+				URL:        chosen.URL,
+				EventTypes: chosen.EventTypes,
+			}
 		}
 		if err := tunnelstate.Save(state); err != nil {
 			return fmt.Errorf("saving tunnel state: %w", err)
