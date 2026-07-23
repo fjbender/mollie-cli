@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -174,6 +175,18 @@ func runWebhookTunnel(_ *cobra.Command, _ []string) error {
 		return fmt.Errorf("cloudflared not found on PATH: %w\n\n%s", err, cloudflaredInstallHint())
 	}
 
+	// Bind the local port up front, before anything with an external side
+	// effect (tunnel, subscription mutation) happens. Binding late would mean
+	// a busy port fails only after we've already repointed a real webhook
+	// subscription at a tunnel nothing is listening behind — silently
+	// misrouting events instead of the fail-fast "error instead of falling
+	// back" behavior this command promises.
+	ln, err := net.Listen("tcp", fmt.Sprintf("localhost:%d", whtPort))
+	if err != nil {
+		return fmt.Errorf("cannot bind local port %d (is it already in use?): %w", whtPort, err)
+	}
+	defer func() { _ = ln.Close() }() // harmless if server.Serve already closed it
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -292,6 +305,14 @@ func runWebhookTunnel(_ *cobra.Command, _ []string) error {
 			return fmt.Errorf("selected webhook %s not found", chosenID)
 		}
 
+		if envState.PendingRestore != nil && envState.PendingRestore.ID != chosen.ID {
+			// The user declined the earlier "restore from a previous crash?"
+			// prompt, and is now about to repoint a different (or the same,
+			// already-broken) subscription. Overwriting silently would lose
+			// the only record of what the original crash needs restored to.
+			fmt.Fprintf(os.Stderr, "warning: discarding an unresolved restore snapshot for %q — restore it first with a future run if you still need it.\n", envState.PendingRestore.Name)
+		}
+
 		envState.PendingRestore = &tunnelstate.SubscriptionSnapshot{
 			ID:         chosen.ID,
 			Name:       chosen.Name,
@@ -318,11 +339,10 @@ func runWebhookTunnel(_ *cobra.Command, _ []string) error {
 	}
 
 	server := &http.Server{
-		Addr:    fmt.Sprintf("localhost:%d", whtPort),
 		Handler: webhookserver.Handler(secret, printEvent),
 	}
 	go func() {
-		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		if err := server.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			fmt.Fprintf(os.Stderr, "local server error: %v\n", err)
 		}
 	}()
