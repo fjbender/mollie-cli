@@ -1,12 +1,17 @@
 package cmd
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os/exec"
 	"runtime"
 
 	"github.com/spf13/cobra"
+
+	"github.com/fjbender/mollie-cli/internal/config"
+	"github.com/fjbender/mollie-cli/internal/mollieclient"
+	"github.com/fjbender/mollie-cli/internal/webhookevents"
 )
 
 var (
@@ -43,6 +48,78 @@ func cloudflaredInstallHint() string {
 	default:
 		return "Download a binary for your platform from https://github.com/cloudflare/cloudflared/releases"
 	}
+}
+
+// subscriptionActionKind describes what webhook-tunnel should do about
+// test-mode webhook subscriptions before it can start receiving events.
+type subscriptionActionKind int
+
+const (
+	// actionCreateFresh means a free subscription slot exists — create one
+	// directly. Never destructive; we get a fresh signing secret.
+	actionCreateFresh subscriptionActionKind = iota
+	// actionRecreateOwned means both slots are full but one of them is a
+	// subscription this tool created previously — delete and recreate it.
+	// Nobody outside this tool depends on its secret, so this is also
+	// never destructive.
+	actionRecreateOwned
+	// actionPickForeign means both slots are full and neither belongs to
+	// this tool — the user must choose which one to temporarily repoint.
+	actionPickForeign
+)
+
+// subscriptionAction is the result of resolveSubscriptionAction.
+type subscriptionAction struct {
+	Kind     subscriptionActionKind
+	Existing *whWebhook // set for actionRecreateOwned
+}
+
+// maxTestSubscriptions is the number of test-mode webhook subscriptions
+// Mollie currently allows per organization.
+const maxTestSubscriptions = 2
+
+// resolveSubscriptionAction decides what to do about test-mode webhook
+// subscriptions given the current list and the ID of a subscription this
+// tool created in a previous run (from the state file; "" if none/unknown).
+// It makes no API calls — this is pure decision logic, kept separate from
+// the actual HTTP/prompt side effects so it can be unit tested directly.
+func resolveSubscriptionAction(existing []whWebhook, ownedID string) subscriptionAction {
+	if len(existing) < maxTestSubscriptions {
+		return subscriptionAction{Kind: actionCreateFresh}
+	}
+
+	if ownedID != "" {
+		for i := range existing {
+			if existing[i].ID == ownedID {
+				return subscriptionAction{Kind: actionRecreateOwned, Existing: &existing[i]}
+			}
+		}
+	}
+
+	return subscriptionAction{Kind: actionPickForeign}
+}
+
+// resolveEventTypes returns the event types to subscribe to: whtEventTypes
+// verbatim if the user set it, otherwise every event type the current
+// credential can access (see internal/webhookevents).
+func resolveEventTypes(ctx context.Context) ([]string, error) {
+	if whtEventTypes != "" {
+		return parseWebhookEventTypes(whtEventTypes), nil
+	}
+
+	key := cfg.APIKey
+	if flagAPIKey != "" {
+		key = flagAPIKey
+	}
+	if config.IsAPIKey(key) {
+		return webhookevents.Resolve(ctx, true, nil)
+	}
+
+	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile, flagVerbose)
+	if err != nil {
+		return nil, err
+	}
+	return webhookevents.Resolve(ctx, false, client.Permissions)
 }
 
 func runWebhookTunnel(_ *cobra.Command, _ []string) error {
