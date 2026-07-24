@@ -1599,7 +1599,7 @@ func retryTunnelWebhookCall(ctx context.Context, fn func() error) error {
 			return nil
 		}
 		if attempt < webhookURLRetryAttempts {
-			fmt.Printf("  Attempt %d/%d failed (%v) — the tunnel may not be resolvable yet, retrying...\n", attempt, webhookURLRetryAttempts, err)
+			fmt.Printf("  Attempt %d/%d failed (%v) — often just the tunnel not being resolvable yet, retrying...\n", attempt, webhookURLRetryAttempts, err)
 			select {
 			case <-time.After(webhookURLRetryDelay):
 			case <-ctx.Done():
@@ -1731,10 +1731,13 @@ func runWebhookTunnel(_ *cobra.Command, _ []string) error {
 	// created/patched below — Mollie's create/update validates the URL
 	// synchronously, including expecting an HTTP 200, so cloudflared needs
 	// somewhere live to forward that validation request to right now. The
-	// handler starts out secret-less; the actionCreateFresh/actionRecreateOwned
-	// case swaps in the real one the moment a fresh secret is known.
+	// initial handler uses a no-op callback: nothing genuine can reach the
+	// tunnel yet (no subscription points at it), so the only thing that will
+	// hit this handler before it's swapped is Mollie's own validation ping —
+	// which isn't a real event and shouldn't be printed as one. Both branches
+	// below swap in printEvent once they're done mutating the subscription.
 	var handler handlerSwap
-	handler.Store(webhookserver.Handler("", printEvent))
+	handler.Store(webhookserver.Handler("", func(webhookserver.Event) {}))
 	server := &http.Server{Handler: &handler}
 	go func() {
 		if err := server.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -1851,6 +1854,7 @@ func runWebhookTunnel(_ *cobra.Command, _ []string) error {
 		}); err != nil {
 			return fmt.Errorf("repointing webhook subscription %s: %w", chosen.ID, err)
 		}
+		handler.Store(webhookserver.Handler("", printEvent))
 
 		fmt.Printf("⚠ Repointed existing subscription %q — its signing secret is unknown, so incoming events cannot be verified this session.\n", chosen.Name)
 	}
