@@ -1995,3 +1995,633 @@ This requires two existing test-mode subscriptions to force the `actionPickForei
 ```bash
 rm -f mollie-cli
 ```
+
+---
+
+### Task 10: Revamp DNS-propagation retry to 10 attempts with linear backoff (~45s total)
+
+**Files:**
+- Modify: `cmd/webhooktunnel.go:161-195`
+- Test: Modify `cmd/webhooktunnel_test.go`
+
+The current `retryTunnelWebhookCall` (5 attempts, flat 2s delay) sometimes isn't patient enough for slower Cloudflare DNS propagation. This splits it into a pure, injectable-delay `retryWithBackoff` engine — so tests don't sleep for real seconds — plus a `retryDelay` function giving 1s, 2s, ..., 9s (9 waits, summing to exactly 45s across 10 attempts). `retryTunnelWebhookCall` becomes a thin wrapper, so its two existing call sites (creating a fresh subscription, repointing a foreign one) don't need to change.
+
+- [ ] **Step 1: Write the failing tests**
+
+Append to `cmd/webhooktunnel_test.go` (add `"context"`, `"errors"`, and `"time"` to the import block — it currently only imports `"testing"`):
+
+```go
+package cmd
+
+import (
+	"context"
+	"errors"
+	"testing"
+	"time"
+)
+```
+
+```go
+func TestRetryDelay_LinearIncreaseSummingTo45Seconds(t *testing.T) {
+	var total time.Duration
+	for attempt := 1; attempt <= 9; attempt++ {
+		got := retryDelay(attempt)
+		want := time.Duration(attempt) * time.Second
+		if got != want {
+			t.Errorf("retryDelay(%d) = %s, want %s", attempt, got, want)
+		}
+		total += got
+	}
+	if total != 45*time.Second {
+		t.Errorf("sum of retryDelay(1..9) = %s, want 45s", total)
+	}
+}
+
+func TestRetryWithBackoff_SucceedsWithoutRetryingOnFirstTry(t *testing.T) {
+	calls := 0
+	noDelay := func(int) time.Duration { return 0 }
+
+	err := retryWithBackoff(context.Background(), 10, noDelay, func() error {
+		calls++
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if calls != 1 {
+		t.Errorf("calls = %d, want 1", calls)
+	}
+}
+
+func TestRetryWithBackoff_RetriesUntilSuccessWithinAttempts(t *testing.T) {
+	calls := 0
+	noDelay := func(int) time.Duration { return 0 }
+
+	err := retryWithBackoff(context.Background(), 10, noDelay, func() error {
+		calls++
+		if calls < 4 {
+			return errors.New("not ready yet")
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if calls != 4 {
+		t.Errorf("calls = %d, want 4", calls)
+	}
+}
+
+func TestRetryWithBackoff_GivesUpAfterAllAttemptsAndReturnsLastError(t *testing.T) {
+	calls := 0
+	noDelay := func(int) time.Duration { return 0 }
+	wantErr := errors.New("still not resolvable")
+
+	err := retryWithBackoff(context.Background(), 3, noDelay, func() error {
+		calls++
+		return wantErr
+	})
+	if !errors.Is(err, wantErr) {
+		t.Errorf("err = %v, want %v", err, wantErr)
+	}
+	if calls != 3 {
+		t.Errorf("calls = %d, want 3 (all attempts used)", calls)
+	}
+}
+
+func TestRetryWithBackoff_StopsImmediatelyWhenContextCanceledDuringWait(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	calls := 0
+
+	delayThenCancel := func(int) time.Duration {
+		cancel()
+		return time.Hour // would hang forever if ctx.Done() weren't checked
+	}
+
+	start := time.Now()
+	err := retryWithBackoff(ctx, 10, delayThenCancel, func() error {
+		calls++
+		return errors.New("always fails")
+	})
+	elapsed := time.Since(start)
+
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("err = %v, want context.Canceled", err)
+	}
+	if calls != 1 {
+		t.Errorf("calls = %d, want 1 (should stop after the first failed attempt once canceled)", calls)
+	}
+	if elapsed > time.Second {
+		t.Errorf("took %s, want it to return promptly once ctx is canceled instead of waiting out the delay", elapsed)
+	}
+}
+```
+
+- [ ] **Step 2: Run tests to confirm they fail**
+
+```bash
+go test ./cmd/... -run TestRetry -v
+```
+
+Expected: compile error — `retryDelay` and `retryWithBackoff` don't exist yet.
+
+- [ ] **Step 3: Commit the failing tests**
+
+```bash
+git add cmd/webhooktunnel_test.go
+git commit -m "test: add failing tests for linear-backoff retry engine"
+```
+
+- [ ] **Step 4: Replace the retry constants and function**
+
+Replace lines 161-195 of `cmd/webhooktunnel.go` (from the `webhookURLRetryAttempts and webhookURLRetryDelay` doc comment through the end of `retryTunnelWebhookCall`) with:
+
+```go
+// webhookURLRetryAttempts bounds how long we'll tolerate Mollie rejecting a
+// webhook create/update because it can't yet resolve the tunnel's hostname.
+// A freshly-started cloudflared quick tunnel is usually resolvable within a
+// few seconds, but not always instantly — Mollie validates the URL
+// synchronously when the subscription is created/patched, so a request fired
+// immediately after cloudflared reports its URL can fail with a DNS-lookup
+// error that has nothing to do with the request itself. 10 attempts with
+// retryDelay's linear backoff (1s, 2s, ..., 9s) gives ~45s of total patience.
+const webhookURLRetryAttempts = 10
+
+// retryDelay returns how long to wait after a failed attempt (1-indexed)
+// before the next one. It grows by one second per attempt — 1s after attempt
+// 1, 2s after attempt 2, and so on — so the 9 waits between 10 attempts sum
+// to exactly 45s, tolerating slower Cloudflare DNS propagation without an
+// unbounded wait.
+func retryDelay(attempt int) time.Duration {
+	return time.Duration(attempt) * time.Second
+}
+
+// retryTunnelWebhookCall retries fn using retryDelay's backoff, to absorb
+// the tunnel-DNS-not-ready-yet failure described above.
+func retryTunnelWebhookCall(ctx context.Context, fn func() error) error {
+	return retryWithBackoff(ctx, webhookURLRetryAttempts, retryDelay, fn)
+}
+
+// retryWithBackoff calls fn up to attempts times, waiting delay(attempt)
+// between a failed attempt and the next. It returns nil as soon as fn
+// succeeds, the last error once attempts are exhausted, or immediately if
+// ctx is canceled while waiting between attempts. delay is a parameter
+// (rather than baked into the loop) so tests can substitute a fast or zero
+// delay instead of waiting out real backoff durations.
+func retryWithBackoff(ctx context.Context, attempts int, delay func(attempt int) time.Duration, fn func() error) error {
+	var err error
+	start := time.Now()
+	for attempt := 1; attempt <= attempts; attempt++ {
+		if err = fn(); err == nil {
+			return nil
+		}
+		if attempt < attempts {
+			d := delay(attempt)
+			fmt.Printf("  Attempt %d/%d failed (%v) — likely Cloudflare DNS still propagating. Retrying in %s (%s elapsed)...\n",
+				attempt, attempts, err, d.Round(time.Second), time.Since(start).Round(time.Second))
+			select {
+			case <-time.After(d):
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+	}
+	return err
+}
+```
+
+- [ ] **Step 5: Run tests to verify they pass**
+
+```bash
+go test ./cmd/... -run TestRetry -v
+```
+
+Expected: all 5 tests pass, finishing in well under a second (no real sleeping — every test uses a zero or immediately-canceling delay function).
+
+- [ ] **Step 6: Verify the full build and test suite still succeed**
+
+```bash
+go build ./... && go test ./... && go vet ./...
+```
+
+Expected: no errors.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add cmd/webhooktunnel.go
+git commit -m "feat: revamp webhook subscription retry to 10 attempts with linear backoff"
+```
+
+---
+
+### Task 11: Log every incoming webhook HTTP call to a file
+
+**Files:**
+- Modify: `internal/webhookserver/handler.go`
+- Test: Modify `internal/webhookserver/handler_test.go`
+- Modify: `cmd/webhooktunnel.go`
+- Test: Modify `cmd/webhooktunnel_test.go`
+
+Adds a `--logfile` flag (default `/tmp/mollie-webhook-log`) that always appends a raw, HTTP-wire-shaped record of every incoming call to that file — method, URL, Host, all headers (Cloudflare-forwarded ones included as received), a timestamp, and the raw body — creating the file if it doesn't exist and appending if it does. This captures every request the local server receives, including Mollie's own validation ping, since it's a diagnostic artifact distinct from the console event tail (which intentionally excludes that ping).
+
+- [ ] **Step 1: Write the failing test for the extended `Event` fields**
+
+Append to `internal/webhookserver/handler_test.go`:
+
+```go
+func TestHandler_PopulatesMethodURLHostAndHeaders(t *testing.T) {
+	body := `{"id":"event_1"}`
+	var got webhookserver.Event
+	handler := webhookserver.Handler("", func(e webhookserver.Event) { got = e })
+
+	req := httptest.NewRequest(http.MethodPost, "/webhook?foo=bar", strings.NewReader(body))
+	req.Host = "abcd1234.trycloudflare.com"
+	req.Header.Set("Cf-Connecting-Ip", "203.0.113.7")
+	req.Header.Set("Cf-Ray", "abc123")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if got.Method != http.MethodPost {
+		t.Errorf("Method = %q, want %q", got.Method, http.MethodPost)
+	}
+	if got.URL != "/webhook?foo=bar" {
+		t.Errorf("URL = %q, want %q", got.URL, "/webhook?foo=bar")
+	}
+	if got.Host != "abcd1234.trycloudflare.com" {
+		t.Errorf("Host = %q, want %q", got.Host, "abcd1234.trycloudflare.com")
+	}
+	if got.Header.Get("Cf-Connecting-Ip") != "203.0.113.7" {
+		t.Errorf("Header[Cf-Connecting-Ip] = %q, want %q", got.Header.Get("Cf-Connecting-Ip"), "203.0.113.7")
+	}
+	if got.Header.Get("Cf-Ray") != "abc123" {
+		t.Errorf("Header[Cf-Ray] = %q, want %q", got.Header.Get("Cf-Ray"), "abc123")
+	}
+}
+```
+
+- [ ] **Step 2: Run the test to confirm it fails**
+
+```bash
+go test ./internal/webhookserver/... -run TestHandler_PopulatesMethodURLHostAndHeaders -v
+```
+
+Expected: compile error — `Event` has no `Method`/`Host` field yet (the test also references `.URL` and `.Header`, which don't exist yet either).
+
+- [ ] **Step 3: Commit the failing test**
+
+```bash
+git add internal/webhookserver/handler_test.go
+git commit -m "test: add failing test for Event method/URL/host/header fields"
+```
+
+- [ ] **Step 4: Extend `Event` and populate the new fields in `Handler`**
+
+In `internal/webhookserver/handler.go`, replace the `Event` struct:
+
+```go
+// Event is a single received webhook delivery.
+type Event struct {
+	ReceivedAt time.Time
+	Method     string
+	URL        string
+	Host       string
+	Header     http.Header
+	Body       []byte
+	Verified   bool
+}
+```
+
+Replace the `onEvent(Event{...})` call inside `Handler`:
+
+```go
+		onEvent(Event{
+			ReceivedAt: time.Now(),
+			Method:     r.Method,
+			URL:        r.URL.String(),
+			Host:       r.Host,
+			Header:     r.Header.Clone(),
+			Body:       body,
+			Verified:   verified,
+		})
+```
+
+- [ ] **Step 5: Run tests to verify they pass**
+
+```bash
+go test ./internal/webhookserver/... -v
+```
+
+Expected: all 7 tests pass (the 6 existing ones plus the new one).
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add internal/webhookserver/handler.go
+git commit -m "feat: populate method, URL, host, and headers on webhookserver.Event"
+```
+
+- [ ] **Step 7: Write the failing tests for the file logger**
+
+Append to `cmd/webhooktunnel_test.go` (add `"net/http"`, `"os"`, `"path/filepath"`, `"strings"`, and the `webhookserver` import to the import block from Task 10):
+
+```go
+package cmd
+
+import (
+	"context"
+	"errors"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/fjbender/mollie-cli/internal/webhookserver"
+)
+```
+
+```go
+func TestAppendEventLog_WritesTimestampMethodURLHeadersAndBody(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "webhook-log")
+
+	ev := webhookserver.Event{
+		ReceivedAt: time.Date(2026, 8, 6, 13, 45, 0, 0, time.UTC),
+		Method:     http.MethodPost,
+		URL:        "/webhook",
+		Host:       "abcd1234.trycloudflare.com",
+		Header:     http.Header{"Cf-Ray": {"abc123"}, "Content-Type": {"application/json"}},
+		Body:       []byte(`{"id":"event_1"}`),
+	}
+
+	if err := appendEventLog(path, ev); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading log file: %v", err)
+	}
+	got := string(data)
+
+	for _, want := range []string{
+		"2026-08-06T13:45:00Z",
+		"POST /webhook HTTP/1.1",
+		"Host: abcd1234.trycloudflare.com",
+		"Cf-Ray: abc123",
+		"Content-Type: application/json",
+		`{"id":"event_1"}`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("log output missing %q, got:\n%s", want, got)
+		}
+	}
+}
+
+func TestAppendEventLog_AppendsRatherThanTruncating(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "webhook-log")
+
+	first := webhookserver.Event{ReceivedAt: time.Now(), Method: "POST", URL: "/a", Body: []byte("first-body")}
+	second := webhookserver.Event{ReceivedAt: time.Now(), Method: "POST", URL: "/b", Body: []byte("second-body")}
+
+	if err := appendEventLog(path, first); err != nil {
+		t.Fatalf("unexpected error on first write: %v", err)
+	}
+	if err := appendEventLog(path, second); err != nil {
+		t.Fatalf("unexpected error on second write: %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading log file: %v", err)
+	}
+	got := string(data)
+	if !strings.Contains(got, "first-body") || !strings.Contains(got, "second-body") {
+		t.Errorf("expected both entries present, got:\n%s", got)
+	}
+	if strings.Index(got, "first-body") > strings.Index(got, "second-body") {
+		t.Error("expected the first entry to appear before the second")
+	}
+}
+
+func TestCombineEventHandlers_CallsAllInOrder(t *testing.T) {
+	var calls []string
+	a := func(webhookserver.Event) { calls = append(calls, "a") }
+	b := func(webhookserver.Event) { calls = append(calls, "b") }
+
+	combined := combineEventHandlers(a, b)
+	combined(webhookserver.Event{})
+
+	if len(calls) != 2 || calls[0] != "a" || calls[1] != "b" {
+		t.Errorf("calls = %v, want [a b]", calls)
+	}
+}
+```
+
+- [ ] **Step 8: Run tests to confirm they fail**
+
+```bash
+go test ./cmd/... -run 'TestAppendEventLog|TestCombineEventHandlers' -v
+```
+
+Expected: compile error — `appendEventLog` and `combineEventHandlers` don't exist yet.
+
+- [ ] **Step 9: Commit the failing tests**
+
+```bash
+git add cmd/webhooktunnel_test.go
+git commit -m "test: add failing tests for webhook call file logging"
+```
+
+- [ ] **Step 10: Add the `--logfile` flag, the logger, and wire it into the lifecycle**
+
+Add `whtLogFile` to the flag var block near the top of `cmd/webhooktunnel.go`:
+
+```go
+var (
+	whtPort       int
+	whtEventTypes string
+	whtLogFile    string
+)
+```
+
+Register it in `init()`, right after the `whtEventTypes` line:
+
+```go
+	webhookTunnelCmd.Flags().StringVar(&whtLogFile, "logfile", "/tmp/mollie-webhook-log", "File to append a raw log of every incoming webhook HTTP call to (method, URL, headers, body, timestamp)")
+```
+
+Add `"sort"`, `"strings"`, and `"sync"` to the import block (alongside the existing stdlib imports).
+
+Add these two functions after `printEvent` and before `runWebhookTunnel`:
+
+```go
+// newEventLogger returns an onEvent callback that appends every received
+// webhook call to path as a raw HTTP-request-shaped log entry. A mutex
+// serializes writes from concurrent in-flight requests.
+func newEventLogger(path string) func(webhookserver.Event) {
+	var mu sync.Mutex
+	return func(ev webhookserver.Event) {
+		mu.Lock()
+		defer mu.Unlock()
+		if err := appendEventLog(path, ev); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: failed to write webhook log entry: %v\n", err)
+		}
+	}
+}
+
+// appendEventLog appends a single raw HTTP-request-shaped record for ev to
+// the file at path, creating it if it doesn't exist. Cloudflare-forwarded
+// headers (Cf-Connecting-Ip, Cf-Ray, etc.) are included as received — this
+// is a local diagnostic log, never sent anywhere.
+func appendEventLog(path string, ev webhookserver.Event) error {
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
+	if err != nil {
+		return fmt.Errorf("opening webhook log file: %w", err)
+	}
+	defer f.Close()
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "=== %s ===\n", ev.ReceivedAt.Format(time.RFC3339))
+	fmt.Fprintf(&b, "%s %s HTTP/1.1\n", ev.Method, ev.URL)
+	fmt.Fprintf(&b, "Host: %s\n", ev.Host)
+	headerNames := make([]string, 0, len(ev.Header))
+	for name := range ev.Header {
+		headerNames = append(headerNames, name)
+	}
+	sort.Strings(headerNames)
+	for _, name := range headerNames {
+		for _, v := range ev.Header[name] {
+			fmt.Fprintf(&b, "%s: %s\n", name, v)
+		}
+	}
+	b.WriteString("\n")
+	b.Write(ev.Body)
+	b.WriteString("\n\n")
+
+	_, err = f.WriteString(b.String())
+	return err
+}
+
+// combineEventHandlers returns an onEvent callback that calls each of fns in
+// order for every event, so the file logger and the console tail can both
+// observe the same events without the local HTTP handler knowing about
+// either concern individually.
+func combineEventHandlers(fns ...func(webhookserver.Event)) func(webhookserver.Event) {
+	return func(ev webhookserver.Event) {
+		for _, fn := range fns {
+			fn(ev)
+		}
+	}
+}
+```
+
+Wire the logger into `runWebhookTunnel`. Immediately before the existing `var handler handlerSwap` line, add:
+
+```go
+	logger := newEventLogger(whtLogFile)
+```
+
+Then change the three `handler.Store(...)` call sites to route every event through the logger as well as the console tail:
+
+Replace:
+```go
+	handler.Store(webhookserver.Handler("", func(webhookserver.Event) {}))
+```
+with:
+```go
+	handler.Store(webhookserver.Handler("", logger))
+```
+
+Replace:
+```go
+		handler.Store(webhookserver.Handler(secret, printEvent))
+```
+with:
+```go
+		handler.Store(webhookserver.Handler(secret, combineEventHandlers(logger, printEvent)))
+```
+
+Replace:
+```go
+		handler.Store(webhookserver.Handler("", printEvent))
+```
+with:
+```go
+		handler.Store(webhookserver.Handler("", combineEventHandlers(logger, printEvent)))
+```
+
+- [ ] **Step 11: Run tests to verify they pass**
+
+```bash
+go test ./cmd/... -run 'TestAppendEventLog|TestCombineEventHandlers' -v
+```
+
+Expected: all 3 tests pass.
+
+- [ ] **Step 12: Verify the full build and test suite still succeed**
+
+```bash
+go build ./... && go test ./... && go vet ./...
+```
+
+Expected: no errors.
+
+- [ ] **Step 13: Commit**
+
+```bash
+git add cmd/webhooktunnel.go
+git commit -m "feat: log every incoming webhook call to --logfile"
+```
+
+---
+
+### Task 12: Manual verification of the new retry backoff and webhook logging
+
+Requires: `cloudflared` installed, network access, and a Mollie test-mode credential already configured via `mollie auth setup`. Like Task 9, this can't be automated in CI.
+
+- [ ] **Step 1: Build the binary**
+
+```bash
+go build -o mollie-cli .
+```
+
+- [ ] **Step 2: Verify the default log file**
+
+```bash
+rm -f /tmp/mollie-webhook-log
+./mollie-cli webhook-tunnel
+```
+
+In a second terminal, once the tunnel is up, note the webhook ID and ping it:
+
+```bash
+./mollie-cli webhooks ping wh_...
+```
+
+Expected: within a couple of seconds, `/tmp/mollie-webhook-log` exists and contains at least one `=== <timestamp> ===` block with a `POST ... HTTP/1.1` line, a `Host:` line, headers, and a JSON body. Cancel with Ctrl-C.
+
+- [ ] **Step 3: Verify `--logfile` overrides the destination and appends across runs**
+
+```bash
+custom=$(mktemp -d)/custom-webhook-log
+./mollie-cli webhook-tunnel --logfile "$custom"
+```
+
+Ping it again from a second terminal as in Step 2, then Ctrl-C. Confirm `$custom` was created (not `/tmp/mollie-webhook-log`) and contains one entry. Run the same command a second time, ping again, and confirm the file now contains two entries rather than being truncated back to one.
+
+- [ ] **Step 4: Observe the new retry messaging (only reproducible if a retry actually happens)**
+
+This can't be forced deterministically — the DNS-not-ready failure is timing-dependent — but if a retry is ever observed during Step 2 or 3's `webhook-tunnel` startup, confirm the printed message matches the new format, e.g.:
+
+```
+  Attempt 2/10 failed (...) — likely Cloudflare DNS still propagating. Retrying in 2s (1s elapsed)...
+```
+
+- [ ] **Step 5: Clean up**
+
+```bash
+rm -f mollie-cli /tmp/mollie-webhook-log "$custom"
+```

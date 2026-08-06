@@ -161,3 +161,11 @@ Sketch of the intended behavior:
 - Rich/TUI tail output (bubbletea dashboard) — noted as a natural future iteration given the full JSON payload is already available.
 - Auto-picking a port fallback if `--port` is already in use (errors instead).
 - A manual `mollie webhook-tunnel restore` subcommand — recovery is auto-detected on next start instead.
+
+## Addendum (2026-08-06): retry backoff revamp + full webhook call logging
+
+Two small follow-ups after initial shipping, based on real usage: the fixed 5×2s DNS-propagation retry occasionally wasn't enough for slower Cloudflare propagation, and there was no durable record of raw incoming webhook calls for debugging.
+
+**Retry backoff.** `webhookURLRetryAttempts`/`webhookURLRetryDelay` (`cmd/webhooktunnel.go:161-195`) become 10 attempts with a linear increasing delay of `attempt` seconds between them (1s, 2s, ..., 9s — 9 waits summing to exactly 45s). The retry loop is split into a pure, injectable-delay `retryWithBackoff` engine plus a `retryDelay` function, so tests don't have to sleep for real seconds; `retryTunnelWebhookCall` becomes a thin wrapper preserving its existing call sites. Per-attempt feedback is upgraded to show the upcoming wait and elapsed time.
+
+**Webhook call logging.** New `--logfile` flag (default `/tmp/mollie-webhook-log`) always appends a raw, HTTP-wire-shaped record of every incoming call — including Mollie's own validation ping, since this is a diagnostic artifact distinct from the console event tail — to that file: timestamp, method, URL, Host, all headers (Cloudflare-forwarded ones included as received), and the raw body. `webhookserver.Event` gains `Method`, `URL`, `Host`, and `Header` fields (additive, populated from the request in `Handler`). This deliberately writes to `/tmp` rather than `config.Dir()` per explicit request, and always opens in append mode so repeated runs accumulate rather than overwrite.
