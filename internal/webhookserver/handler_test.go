@@ -128,6 +128,36 @@ type errReader struct{}
 func (errReader) Read([]byte) (int, error) { return 0, errors.New("simulated read error") }
 func (errReader) Close() error             { return nil }
 
+func TestHandler_PopulatesMethodURLHostAndHeaders(t *testing.T) {
+	body := `{"id":"event_1"}`
+	var got webhookserver.Event
+	handler := webhookserver.Handler("", func(e webhookserver.Event) { got = e })
+
+	req := httptest.NewRequest(http.MethodPost, "/webhook?foo=bar", strings.NewReader(body))
+	req.Host = "abcd1234.trycloudflare.com"
+	req.Header.Set("Cf-Connecting-Ip", "203.0.113.7")
+	req.Header.Set("Cf-Ray", "abc123")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if got.Method != http.MethodPost {
+		t.Errorf("Method = %q, want %q", got.Method, http.MethodPost)
+	}
+	if got.URL != "/webhook?foo=bar" {
+		t.Errorf("URL = %q, want %q", got.URL, "/webhook?foo=bar")
+	}
+	if got.Host != "abcd1234.trycloudflare.com" {
+		t.Errorf("Host = %q, want %q", got.Host, "abcd1234.trycloudflare.com")
+	}
+	if got.Header.Get("Cf-Connecting-Ip") != "203.0.113.7" {
+		t.Errorf("Header[Cf-Connecting-Ip] = %q, want %q", got.Header.Get("Cf-Connecting-Ip"), "203.0.113.7")
+	}
+	if got.Header.Get("Cf-Ray") != "abc123" {
+		t.Errorf("Header[Cf-Ray] = %q, want %q", got.Header.Get("Cf-Ray"), "abc123")
+	}
+}
+
 func TestHandler_BodyReadErrorRejected(t *testing.T) {
 	called := false
 	handler := webhookserver.Handler("whsec_test", func(webhookserver.Event) { called = true })
