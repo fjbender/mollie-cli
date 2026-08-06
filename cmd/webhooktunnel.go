@@ -158,34 +158,50 @@ func restoreSnapshot(ctx context.Context, c *whClient, snap *tunnelstate.Subscri
 	return c.mutate(ctx, http.MethodPatch, "/webhooks/"+snap.ID, body, nil)
 }
 
-// webhookURLRetryAttempts and webhookURLRetryDelay bound how long we'll
-// tolerate Mollie rejecting a webhook create/update because it can't yet
-// resolve the tunnel's hostname. A freshly-started cloudflared quick tunnel
-// is usually resolvable within a few seconds, but not always instantly —
-// Mollie validates the URL synchronously when the subscription is
-// created/patched, so a request fired immediately after cloudflared reports
-// its URL can fail with a DNS-lookup error that has nothing to do with the
-// request itself.
-const (
-	webhookURLRetryAttempts = 5
-	webhookURLRetryDelay    = 2 * time.Second
-)
+// webhookURLRetryAttempts bounds how long we'll tolerate Mollie rejecting a
+// webhook create/update because it can't yet resolve the tunnel's hostname.
+// A freshly-started cloudflared quick tunnel is usually resolvable within a
+// few seconds, but not always instantly — Mollie validates the URL
+// synchronously when the subscription is created/patched, so a request fired
+// immediately after cloudflared reports its URL can fail with a DNS-lookup
+// error that has nothing to do with the request itself. 10 attempts with
+// retryDelay's linear backoff (1s, 2s, ..., 9s) gives ~45s of total patience.
+const webhookURLRetryAttempts = 10
 
-// retryTunnelWebhookCall retries fn up to webhookURLRetryAttempts times,
-// waiting webhookURLRetryDelay between attempts, to absorb the tunnel-DNS-
-// not-ready-yet failure described above. It gives up and returns the last
-// error once attempts are exhausted, or immediately if ctx is canceled
-// while waiting between attempts.
+// retryDelay returns how long to wait after a failed attempt (1-indexed)
+// before the next one. It grows by one second per attempt — 1s after attempt
+// 1, 2s after attempt 2, and so on — so the 9 waits between 10 attempts sum
+// to exactly 45s, tolerating slower Cloudflare DNS propagation without an
+// unbounded wait.
+func retryDelay(attempt int) time.Duration {
+	return time.Duration(attempt) * time.Second
+}
+
+// retryTunnelWebhookCall retries fn using retryDelay's backoff, to absorb
+// the tunnel-DNS-not-ready-yet failure described above.
 func retryTunnelWebhookCall(ctx context.Context, fn func() error) error {
+	return retryWithBackoff(ctx, webhookURLRetryAttempts, retryDelay, fn)
+}
+
+// retryWithBackoff calls fn up to attempts times, waiting delay(attempt)
+// between a failed attempt and the next. It returns nil as soon as fn
+// succeeds, the last error once attempts are exhausted, or immediately if
+// ctx is canceled while waiting between attempts. delay is a parameter
+// (rather than baked into the loop) so tests can substitute a fast or zero
+// delay instead of waiting out real backoff durations.
+func retryWithBackoff(ctx context.Context, attempts int, delay func(attempt int) time.Duration, fn func() error) error {
 	var err error
-	for attempt := 1; attempt <= webhookURLRetryAttempts; attempt++ {
+	start := time.Now()
+	for attempt := 1; attempt <= attempts; attempt++ {
 		if err = fn(); err == nil {
 			return nil
 		}
-		if attempt < webhookURLRetryAttempts {
-			fmt.Printf("  Attempt %d/%d failed (%v) — often just the tunnel not being resolvable yet, retrying...\n", attempt, webhookURLRetryAttempts, err)
+		if attempt < attempts {
+			d := delay(attempt)
+			fmt.Printf("  Attempt %d/%d failed (%v) — likely Cloudflare DNS still propagating. Retrying in %s (%s elapsed)...\n",
+				attempt, attempts, err, d.Round(time.Second), time.Since(start).Round(time.Second))
 			select {
-			case <-time.After(webhookURLRetryDelay):
+			case <-time.After(d):
 			case <-ctx.Done():
 				return ctx.Err()
 			}
