@@ -3,8 +3,14 @@ package cmd
 import (
 	"context"
 	"errors"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/fjbender/mollie-cli/internal/webhookserver"
 )
 
 func TestResolveSubscriptionAction_FreeSlotCreatesFresh(t *testing.T) {
@@ -144,5 +150,80 @@ func TestRetryWithBackoff_StopsImmediatelyWhenContextCanceledDuringWait(t *testi
 	}
 	if elapsed > time.Second {
 		t.Errorf("took %s, want it to return promptly once ctx is canceled instead of waiting out the delay", elapsed)
+	}
+}
+
+func TestAppendEventLog_WritesTimestampMethodURLHeadersAndBody(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "webhook-log")
+
+	ev := webhookserver.Event{
+		ReceivedAt: time.Date(2026, 8, 6, 13, 45, 0, 0, time.UTC),
+		Method:     http.MethodPost,
+		URL:        "/webhook",
+		Host:       "abcd1234.trycloudflare.com",
+		Header:     http.Header{"Cf-Ray": {"abc123"}, "Content-Type": {"application/json"}},
+		Body:       []byte(`{"id":"event_1"}`),
+	}
+
+	if err := appendEventLog(path, ev); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading log file: %v", err)
+	}
+	got := string(data)
+
+	for _, want := range []string{
+		"2026-08-06T13:45:00Z",
+		"POST /webhook HTTP/1.1",
+		"Host: abcd1234.trycloudflare.com",
+		"Cf-Ray: abc123",
+		"Content-Type: application/json",
+		`{"id":"event_1"}`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("log output missing %q, got:\n%s", want, got)
+		}
+	}
+}
+
+func TestAppendEventLog_AppendsRatherThanTruncating(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "webhook-log")
+
+	first := webhookserver.Event{ReceivedAt: time.Now(), Method: "POST", URL: "/a", Body: []byte("first-body")}
+	second := webhookserver.Event{ReceivedAt: time.Now(), Method: "POST", URL: "/b", Body: []byte("second-body")}
+
+	if err := appendEventLog(path, first); err != nil {
+		t.Fatalf("unexpected error on first write: %v", err)
+	}
+	if err := appendEventLog(path, second); err != nil {
+		t.Fatalf("unexpected error on second write: %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading log file: %v", err)
+	}
+	got := string(data)
+	if !strings.Contains(got, "first-body") || !strings.Contains(got, "second-body") {
+		t.Errorf("expected both entries present, got:\n%s", got)
+	}
+	if strings.Index(got, "first-body") > strings.Index(got, "second-body") {
+		t.Error("expected the first entry to appear before the second")
+	}
+}
+
+func TestCombineEventHandlers_CallsAllInOrder(t *testing.T) {
+	var calls []string
+	a := func(webhookserver.Event) { calls = append(calls, "a") }
+	b := func(webhookserver.Event) { calls = append(calls, "b") }
+
+	combined := combineEventHandlers(a, b)
+	combined(webhookserver.Event{})
+
+	if len(calls) != 2 || calls[0] != "a" || calls[1] != "b" {
+		t.Errorf("calls = %v, want [a b]", calls)
 	}
 }
