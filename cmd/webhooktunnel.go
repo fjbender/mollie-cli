@@ -12,6 +12,9 @@ import (
 	"os/exec"
 	"os/signal"
 	"runtime"
+	"sort"
+	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -30,6 +33,7 @@ import (
 var (
 	whtPort       int
 	whtEventTypes string
+	whtLogFile    string
 )
 
 var webhookTunnelCmd = &cobra.Command{
@@ -44,6 +48,7 @@ until you press Ctrl-C. Test mode only — live mode is not yet supported.`,
 func init() {
 	webhookTunnelCmd.Flags().IntVar(&whtPort, "port", 10153, "Local port for the tunnel's HTTP server")
 	webhookTunnelCmd.Flags().StringVar(&whtEventTypes, "event-types", "", `Comma-separated event types to subscribe to (default: every event type this credential can access)`)
+	webhookTunnelCmd.Flags().StringVar(&whtLogFile, "logfile", "/tmp/mollie-webhook-log", "File to append a raw log of every incoming webhook HTTP call to (method, URL, headers, body, timestamp)")
 
 	rootCmd.AddCommand(webhookTunnelCmd)
 }
@@ -248,6 +253,65 @@ func printEvent(ev webhookserver.Event) {
 	fmt.Printf("%s  %-28s  %-30s  [%s]\n", ev.ReceivedAt.Format(time.RFC3339), e.Type, e.EntityID, badge)
 }
 
+// newEventLogger returns an onEvent callback that appends every received
+// webhook call to path as a raw HTTP-request-shaped log entry. A mutex
+// serializes writes from concurrent in-flight requests.
+func newEventLogger(path string) func(webhookserver.Event) {
+	var mu sync.Mutex
+	return func(ev webhookserver.Event) {
+		mu.Lock()
+		defer mu.Unlock()
+		if err := appendEventLog(path, ev); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: failed to write webhook log entry: %v\n", err)
+		}
+	}
+}
+
+// appendEventLog appends a single raw HTTP-request-shaped record for ev to
+// the file at path, creating it if it doesn't exist. Cloudflare-forwarded
+// headers (Cf-Connecting-Ip, Cf-Ray, etc.) are included as received — this
+// is a local diagnostic log, never sent anywhere.
+func appendEventLog(path string, ev webhookserver.Event) error {
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
+	if err != nil {
+		return fmt.Errorf("opening webhook log file: %w", err)
+	}
+	defer f.Close()
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "=== %s ===\n", ev.ReceivedAt.Format(time.RFC3339))
+	fmt.Fprintf(&b, "%s %s HTTP/1.1\n", ev.Method, ev.URL)
+	fmt.Fprintf(&b, "Host: %s\n", ev.Host)
+	headerNames := make([]string, 0, len(ev.Header))
+	for name := range ev.Header {
+		headerNames = append(headerNames, name)
+	}
+	sort.Strings(headerNames)
+	for _, name := range headerNames {
+		for _, v := range ev.Header[name] {
+			fmt.Fprintf(&b, "%s: %s\n", name, v)
+		}
+	}
+	b.WriteString("\n")
+	b.Write(ev.Body)
+	b.WriteString("\n\n")
+
+	_, err = f.WriteString(b.String())
+	return err
+}
+
+// combineEventHandlers returns an onEvent callback that calls each of fns in
+// order for every event, so the file logger and the console tail can both
+// observe the same events without the local HTTP handler knowing about
+// either concern individually.
+func combineEventHandlers(fns ...func(webhookserver.Event)) func(webhookserver.Event) {
+	return func(ev webhookserver.Event) {
+		for _, fn := range fns {
+			fn(ev)
+		}
+	}
+}
+
 func runWebhookTunnel(_ *cobra.Command, _ []string) error {
 	if flagLive {
 		return errors.New("webhook-tunnel only supports test mode for now — it won't run against a live-mode credential")
@@ -336,8 +400,10 @@ func runWebhookTunnel(_ *cobra.Command, _ []string) error {
 	// hit this handler before it's swapped is Mollie's own validation ping —
 	// which isn't a real event and shouldn't be printed as one. Both branches
 	// below swap in printEvent once they're done mutating the subscription.
+	logger := newEventLogger(whtLogFile)
+
 	var handler handlerSwap
-	handler.Store(webhookserver.Handler("", func(webhookserver.Event) {}))
+	handler.Store(webhookserver.Handler("", logger))
 	server := &http.Server{Handler: &handler}
 	go func() {
 		if err := server.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -376,7 +442,7 @@ func runWebhookTunnel(_ *cobra.Command, _ []string) error {
 		}
 		created = &wh
 		secret = wh.WebhookSecret
-		handler.Store(webhookserver.Handler(secret, printEvent))
+		handler.Store(webhookserver.Handler(secret, combineEventHandlers(logger, printEvent)))
 		envState.OwnedSubscriptionID = wh.ID
 		if err := tunnelstate.Save(state); err != nil {
 			return fmt.Errorf("saving tunnel state: %w", err)
@@ -454,7 +520,7 @@ func runWebhookTunnel(_ *cobra.Command, _ []string) error {
 		}); err != nil {
 			return fmt.Errorf("repointing webhook subscription %s: %w", chosen.ID, err)
 		}
-		handler.Store(webhookserver.Handler("", printEvent))
+		handler.Store(webhookserver.Handler("", combineEventHandlers(logger, printEvent)))
 
 		fmt.Printf("⚠ Repointed existing subscription %q — its signing secret is unknown, so incoming events cannot be verified this session.\n", chosen.Name)
 	}
