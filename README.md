@@ -492,6 +492,27 @@ mollie webhooks events get <event-id>
 
 Pass `--event-types` as a comma-separated list (e.g. `payment.paid,refund.refunded`) or `*` to subscribe to all event types. The `create` response includes a `Webhook Secret` for verifying incoming payloads — store it securely; it is not shown again.
 
+### `webhook-tunnel` — local webhook testing
+
+```
+mollie webhook-tunnel [--port N] [--event-types <types>] [--logfile <path>]
+```
+
+Spins up a public [`cloudflared`](https://github.com/cloudflare/cloudflared) tunnel to a local HTTP server, points a test-mode webhook subscription at it, and prints every incoming event to your terminal until you press Ctrl-C. Test mode only — requires `cloudflared` on your `PATH` (e.g. `brew install cloudflared` on macOS).
+
+| Flag | Default | Description |
+|---|---|---|
+| `--port` | `10153` | Local port the tunnel's HTTP server listens on |
+| `--event-types` | every type the active credential can access | Comma-separated event types to subscribe to |
+| `--logfile` | `/tmp/mollie-webhook-log` | Appends a raw HTTP-shaped record (method, URL, headers, body, timestamp) of every incoming call |
+
+Mollie allows only 2 test-mode webhook subscriptions per organization:
+
+- If a free slot exists, `webhook-tunnel` creates one and deletes it again on exit.
+- If both slots are full, it offers to temporarily repoint an existing subscription at the tunnel, then restores its original URL when the tunnel stops — including automatically on the next run if a previous session was interrupted uncleanly (e.g. killed instead of `Ctrl-C`).
+
+Subscription create/update calls are retried for up to ~45s to absorb Cloudflare DNS propagation delay right after the tunnel starts.
+
 ### `defaults` — stored defaults
 
 ```
