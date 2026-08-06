@@ -16,6 +16,10 @@ import (
 // Event is a single received webhook delivery.
 type Event struct {
 	ReceivedAt time.Time
+	Method     string
+	URL        string
+	Host       string
+	Header     http.Header
 	Body       []byte
 	Verified   bool
 }
@@ -49,6 +53,10 @@ func Handler(secret string, onEvent func(Event)) http.Handler {
 
 		onEvent(Event{
 			ReceivedAt: time.Now(),
+			Method:     r.Method,
+			URL:        r.URL.String(),
+			Host:       r.Host,
+			Header:     r.Header.Clone(),
 			Body:       body,
 			Verified:   verified,
 		})
