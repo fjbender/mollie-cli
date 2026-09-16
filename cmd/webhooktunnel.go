@@ -21,6 +21,9 @@ import (
 
 	"github.com/spf13/cobra"
 
+	mollieapi "github.com/mollie/mollie-api-golang"
+	"github.com/mollie/mollie-api-golang/models/operations"
+
 	"github.com/fjbender/mollie-cli/internal/config"
 	"github.com/fjbender/mollie-cli/internal/mollieclient"
 	"github.com/fjbender/mollie-cli/internal/prompt"
@@ -180,17 +183,17 @@ func resolveEventTypes(ctx context.Context) ([]string, error) {
 // restoreSnapshot patches a webhook subscription back to a previously
 // captured state. It never needs the subscription's signing secret — PATCH
 // doesn't change it.
-func restoreSnapshot(ctx context.Context, c *whClient, snap *tunnelstate.SubscriptionSnapshot) error {
-	body := whUpdateBody{
-		Name:       &snap.Name,
-		URL:        &snap.URL,
-		EventTypes: snap.EventTypes,
+func restoreSnapshot(ctx context.Context, client *mollieapi.Client, snap *tunnelstate.SubscriptionSnapshot) error {
+	body := &operations.UpdateWebhookRequestBody{
+		Name: &snap.Name,
+		URL:  &snap.URL,
 	}
-	if c.needsTestmode() {
-		t := true
-		body.Testmode = &t
+	if len(snap.EventTypes) > 0 {
+		et := toUpdateEventTypes(snap.EventTypes)
+		body.EventTypes = &et
 	}
-	return c.mutate(ctx, http.MethodPatch, "/webhooks/"+snap.ID, body, nil)
+	_, err := client.Webhooks.Update(ctx, snap.ID, nil, body)
+	return err
 }
 
 // webhookURLRetryAttempts bounds how long we'll tolerate Mollie rejecting a
@@ -268,6 +271,16 @@ func (s *handlerSwap) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	(*s.h.Load()).ServeHTTP(w, r)
 }
 
+// webhookDelivery is the shape of an incoming webhook POST body, as received
+// on the wire — distinct from the SDK's components.EntityWebhookEvent (which
+// is the richer object returned by the GET /events/{id} API), since this is
+// parsed straight from the tunnel's local HTTP handler before any API call.
+type webhookDelivery struct {
+	ID       string `json:"id"`
+	Type     string `json:"type"`
+	EntityID string `json:"entityId"`
+}
+
 // printEvent logs a single received webhook event to stdout.
 func printEvent(ev webhookserver.Event) {
 	badge := "unverified"
@@ -275,7 +288,7 @@ func printEvent(ev webhookserver.Event) {
 		badge = "verified"
 	}
 
-	var e whEvent
+	var e webhookDelivery
 	if err := json.Unmarshal(ev.Body, &e); err != nil {
 		fmt.Printf("%s  (unparseable body: %v)  [%s]\n", ev.ReceivedAt.Format(time.RFC3339), err, badge)
 		return
@@ -379,7 +392,10 @@ func runWebhookTunnel(_ *cobra.Command, _ []string) error {
 	}
 	envState := state.Get(envName)
 
-	c := newWhClient()
+	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile, flagVerbose)
+	if err != nil {
+		return err
+	}
 
 	if envState.PendingRestore != nil {
 		fmt.Printf("A previous webhook-tunnel session for %q didn't shut down cleanly.\n", envName)
@@ -388,7 +404,7 @@ func runWebhookTunnel(_ *cobra.Command, _ []string) error {
 			return err
 		}
 		if restore {
-			if err := restoreSnapshot(ctx, c, envState.PendingRestore); err != nil {
+			if err := restoreSnapshot(ctx, client, envState.PendingRestore); err != nil {
 				return fmt.Errorf("restoring previous subscription: %w", err)
 			}
 			envState.PendingRestore = nil
@@ -399,12 +415,19 @@ func runWebhookTunnel(_ *cobra.Command, _ []string) error {
 		}
 	}
 
-	var list whWebhookList
-	if err := c.get(ctx, "/webhooks", nil, &list); err != nil {
+	listResp, err := client.Webhooks.List(ctx, operations.ListWebhooksRequest{})
+	if err != nil {
 		return fmt.Errorf("listing webhook subscriptions: %w", err)
 	}
+	var webhooks []whWebhook
+	if listResp.Object != nil {
+		embedded := listResp.Object.GetEmbedded()
+		for _, w := range embedded.GetWebhooks() {
+			webhooks = append(webhooks, fromListEntityWebhook(w))
+		}
+	}
 
-	action := resolveSubscriptionAction(list.Embedded.Webhooks, envState.OwnedSubscriptionID)
+	action := resolveSubscriptionAction(webhooks, envState.OwnedSubscriptionID)
 
 	eventTypes, err := resolveEventTypes(ctx)
 	if err != nil {
@@ -449,24 +472,25 @@ func runWebhookTunnel(_ *cobra.Command, _ []string) error {
 	switch action.Kind {
 	case actionCreateFresh, actionRecreateOwned:
 		if action.Kind == actionRecreateOwned {
-			if err := c.mutate(ctx, http.MethodDelete, "/webhooks/"+action.Existing.ID, c.testmodeBody(), nil); err != nil {
+			if _, err := client.Webhooks.Delete(ctx, action.Existing.ID, nil, nil); err != nil {
 				return fmt.Errorf("deleting previous mollie-cli subscription: %w", err)
 			}
 		}
 
-		body := whCreateBody{
+		body := &operations.CreateWebhookRequestBody{
 			Name:       "mollie-cli webhook-tunnel",
 			URL:        tunnelURL,
-			EventTypes: eventTypes,
-		}
-		if c.needsTestmode() {
-			tm := true
-			body.Testmode = &tm
+			EventTypes: toCreateEventTypes(eventTypes),
 		}
 
 		var wh whWebhook
 		if err := retryTunnelWebhookCall(ctx, func() error {
-			return c.mutate(ctx, http.MethodPost, "/webhooks", body, &wh)
+			resp, err := client.Webhooks.Create(ctx, nil, body)
+			if err != nil {
+				return err
+			}
+			wh = fromCreateWebhook(resp.GetCreateWebhook())
+			return nil
 		}); err != nil {
 			return fmt.Errorf("creating webhook subscription: %w", err)
 		}
@@ -482,8 +506,8 @@ func runWebhookTunnel(_ *cobra.Command, _ []string) error {
 		fmt.Printf("  Signing secret: %s\n", secret)
 
 	case actionPickForeign:
-		opts := make([]prompt.SelectOption[string], 0, len(list.Embedded.Webhooks))
-		for _, wh := range list.Embedded.Webhooks {
+		opts := make([]prompt.SelectOption[string], 0, len(webhooks))
+		for _, wh := range webhooks {
 			opts = append(opts, prompt.SelectOption[string]{
 				Label: fmt.Sprintf("%s — %s (%s)", wh.Name, truncateURL(wh.URL, 50), summarizeEventTypes(wh.EventTypes)),
 				Value: wh.ID,
@@ -495,9 +519,9 @@ func runWebhookTunnel(_ *cobra.Command, _ []string) error {
 		}
 
 		var chosen *whWebhook
-		for i := range list.Embedded.Webhooks {
-			if list.Embedded.Webhooks[i].ID == chosenID {
-				chosen = &list.Embedded.Webhooks[i]
+		for i := range webhooks {
+			if webhooks[i].ID == chosenID {
+				chosen = &webhooks[i]
 				break
 			}
 		}
@@ -537,16 +561,14 @@ func runWebhookTunnel(_ *cobra.Command, _ []string) error {
 			return fmt.Errorf("saving tunnel state: %w", err)
 		}
 
-		patchBody := whUpdateBody{URL: &tunnelURL}
+		patchBody := &operations.UpdateWebhookRequestBody{URL: &tunnelURL}
 		if whtEventTypes != "" {
-			patchBody.EventTypes = eventTypes
-		}
-		if c.needsTestmode() {
-			tm := true
-			patchBody.Testmode = &tm
+			et := toUpdateEventTypes(eventTypes)
+			patchBody.EventTypes = &et
 		}
 		if err := retryTunnelWebhookCall(ctx, func() error {
-			return c.mutate(ctx, http.MethodPatch, "/webhooks/"+chosen.ID, patchBody, nil)
+			_, err := client.Webhooks.Update(ctx, chosen.ID, nil, patchBody)
+			return err
 		}); err != nil {
 			return fmt.Errorf("repointing webhook subscription %s: %w", chosen.ID, err)
 		}
@@ -569,7 +591,7 @@ func runWebhookTunnel(_ *cobra.Command, _ []string) error {
 	switch action.Kind {
 	case actionPickForeign:
 		if envState.PendingRestore != nil {
-			if err := restoreSnapshot(cleanupCtx, c, envState.PendingRestore); err != nil {
+			if err := restoreSnapshot(cleanupCtx, client, envState.PendingRestore); err != nil {
 				fmt.Fprintf(os.Stderr, "warning: failed to restore original webhook subscription: %v\n", err)
 				fmt.Fprintln(os.Stderr, "Run `mollie webhook-tunnel` again to retry automatically, or fix it manually with `mollie webhooks update`.")
 			} else {
@@ -579,7 +601,7 @@ func runWebhookTunnel(_ *cobra.Command, _ []string) error {
 		}
 	default:
 		if created != nil {
-			if err := c.mutate(cleanupCtx, http.MethodDelete, "/webhooks/"+created.ID, c.testmodeBody(), nil); err != nil {
+			if _, err := client.Webhooks.Delete(cleanupCtx, created.ID, nil, nil); err != nil {
 				fmt.Fprintf(os.Stderr, "warning: failed to delete temporary webhook subscription %s: %v\n", created.ID, err)
 			} else {
 				envState.OwnedSubscriptionID = ""

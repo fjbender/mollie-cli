@@ -4,14 +4,13 @@
 package webhookserver
 
 import (
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"io"
 	"net/http"
 	"strings"
 	"time"
+
+	molliewebhooks "github.com/mollie/mollie-api-golang/utils/webhooks"
 )
 
 // Event is a single received webhook delivery.
@@ -71,16 +70,15 @@ func Handler(secret string, onEvent func(Event)) http.Handler {
 const signaturePrefix = "sha256="
 
 // verifySignature reports whether sig is a valid "sha256="-prefixed,
-// hex-encoded HMAC-SHA256 digest of body using secret, compared in constant
-// time. A sig missing the prefix is rejected outright rather than compared,
-// since Mollie never sends one in that shape.
+// hex-encoded HMAC-SHA256 digest of body using secret. The actual comparison
+// is delegated to the Mollie SDK's own signature validator; the prefix check
+// stays local because the SDK treats a signature missing the prefix as
+// already-stripped and would otherwise validate it anyway — Mollie never
+// sends one in that shape, so we reject it outright instead.
 func verifySignature(secret string, body []byte, sig string) bool {
-	sig, ok := strings.CutPrefix(sig, signaturePrefix)
-	if !ok {
+	if !strings.HasPrefix(sig, signaturePrefix) {
 		return false
 	}
-	mac := hmac.New(sha256.New, []byte(secret))
-	mac.Write(body)
-	expected := hex.EncodeToString(mac.Sum(nil))
-	return hmac.Equal([]byte(expected), []byte(sig))
+	ok, _ := molliewebhooks.Validate(string(body), []string{secret}, sig)
+	return ok
 }
