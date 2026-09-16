@@ -495,16 +495,21 @@ Pass `--event-types` as a comma-separated list (e.g. `payment.paid,refund.refund
 ### `webhook-tunnel` — local webhook testing
 
 ```
-mollie webhook-tunnel [--port N] [--event-types <types>] [--logfile <path>]
+mollie webhook-tunnel [--port N] [--event-types <types>] [--logfile <path>] \
+                       [--tunnel cloudflared|external] [--public-url <url>]
 ```
 
-Spins up a public [`cloudflared`](https://github.com/cloudflare/cloudflared) tunnel to a local HTTP server, points a test-mode webhook subscription at it, and prints every incoming event to your terminal until you press Ctrl-C. Test mode only — requires `cloudflared` on your `PATH` (e.g. `brew install cloudflared` on macOS).
+Spins up a public tunnel to a local HTTP server, points a test-mode webhook subscription at it, and prints every incoming event to your terminal until you press Ctrl-C. Test mode only.
+
+By default this uses [`cloudflared`](https://github.com/cloudflare/cloudflared) (requires it on your `PATH`, e.g. `brew install cloudflared` on macOS). If you already expose a local port to the internet some other way — e.g. an SSH reverse tunnel into a self-hosted nginx host — pass `--tunnel external --public-url <url>` instead: the CLI still binds `--port` and serves requests there, it just skips spawning `cloudflared` and trusts the URL you give it.
 
 | Flag | Default | Description |
 |---|---|---|
 | `--port` | `10153` | Local port the tunnel's HTTP server listens on |
 | `--event-types` | every type the active credential can access | Comma-separated event types to subscribe to |
 | `--logfile` | `/tmp/mollie-webhook-log` | Appends a raw HTTP-shaped record (method, URL, headers, body, timestamp) of every incoming call |
+| `--tunnel` | `cloudflared` | Tunnel provider: `cloudflared` or `external` |
+| `--public-url` | — | Publicly reachable URL already routed to `--port`; required when `--tunnel external` |
 
 Mollie allows only 2 test-mode webhook subscriptions per organization:
 
