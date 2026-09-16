@@ -356,7 +356,7 @@ func runPaymentsCreate(cmd *cobra.Command, _ []string) error {
 		req.CaptureMode = &cm
 	}
 	if payCreateLocale != "" {
-		l := components.Locale(payCreateLocale)
+		l := components.Locale2(payCreateLocale)
 		req.Locale = &l
 	}
 	if payCreateTerminalID != "" {
@@ -628,11 +628,6 @@ func paymentDetailRows(p *components.PaymentResponse) [][]string {
 	if a := p.GetAmountChargedBack(); a != nil {
 		amtChargedBack = fmt.Sprintf("%s %s", a.GetValue(), a.GetCurrency())
 	}
-	amtSettlement := "—"
-	if a := p.GetSettlementAmount(); a != nil {
-		amtSettlement = fmt.Sprintf("%s %s", a.GetValue(), a.GetCurrency())
-	}
-
 	isCancelable := "—"
 	if v := p.GetIsCancelable(); v != nil {
 		if *v {
@@ -685,7 +680,6 @@ func paymentDetailRows(p *components.PaymentResponse) [][]string {
 		row("Amount Remaining", amtRemaining),
 		row("Amount Captured", amtCaptured),
 		row("Amount Charged Back", amtChargedBack),
-		row("Settlement Amount", amtSettlement),
 		// Payment details
 		row("Description", p.GetDescription()),
 		row("Method", method),
@@ -773,10 +767,10 @@ func buildBillingAddress() *components.PaymentRequestBillingAddress {
 	return addr
 }
 
-// buildShippingAddress builds a PaymentAddress with the same NL test-mode
+// buildShippingAddress builds a ShippingAddress with the same NL test-mode
 // defaults. Any --shipping-* flag that is non-empty overrides the default.
-func buildShippingAddress() *components.PaymentAddress {
-	addr := &components.PaymentAddress{
+func buildShippingAddress() *components.ShippingAddress {
+	addr := &components.ShippingAddress{
 		GivenName:       overrideOrDefault(defaultAddrGivenName, payCreateShippingGivenName),
 		FamilyName:      overrideOrDefault(defaultAddrFamilyName, payCreateShippingFamilyName),
 		Email:           overrideOrDefault(defaultAddrEmail, payCreateShippingEmail),
@@ -973,7 +967,7 @@ func seedPassThroughFields(req *components.PaymentRequest, m map[string]json.Raw
 		}
 	}
 	if raw, ok := m["shippingAddress"]; ok {
-		var sa components.PaymentAddress
+		var sa components.ShippingAddress
 		if err := json.Unmarshal(raw, &sa); err == nil {
 			req.ShippingAddress = &sa
 		}

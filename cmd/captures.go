@@ -253,11 +253,6 @@ func captureDetailRows(c *components.CaptureResponse) [][]string {
 		amt = fmt.Sprintf("%s %s", a.GetValue(), a.GetCurrency())
 	}
 
-	settlementAmt := "—"
-	if a := c.GetSettlementAmount(); a != nil {
-		settlementAmt = fmt.Sprintf("%s %s", a.GetValue(), a.GetCurrency())
-	}
-
 	metaStr := "—"
 	if m := c.GetMetadata(); m != nil {
 		if b, err := json.Marshal(m); err == nil {
@@ -270,7 +265,6 @@ func captureDetailRows(c *components.CaptureResponse) [][]string {
 		row("Mode", string(c.GetMode())),
 		row("Status", string(c.GetStatus())),
 		row("Amount", amt),
-		row("Settlement Amount", settlementAmt),
 		row("Description", derefOpt(c.GetDescription())),
 		row("Payment ID", c.GetPaymentID()),
 		row("Shipment ID", derefOpt(c.GetShipmentID())),

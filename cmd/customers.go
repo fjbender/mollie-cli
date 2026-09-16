@@ -276,11 +276,11 @@ func runCustomersGet(_ *cobra.Command, args []string) error {
 		return err
 	}
 
-	resp, err := client.Customers.Get(context.Background(), args[0], nil, nil, nil)
+	resp, err := client.Customers.Get(context.Background(), args[0], nil, nil)
 	if err != nil {
 		return fmt.Errorf("getting customer: %w", err)
 	}
-	c := resp.GetObject()
+	c := resp.GetCustomerResponse()
 	if c == nil {
 		return fmt.Errorf("customer not found")
 	}

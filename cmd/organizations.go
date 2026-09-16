@@ -123,7 +123,7 @@ func organizationDetailRows(org *components.EntityOrganization) [][]string {
 		row("Email", org.GetEmail()),
 		row("Locale", locale),
 		row("Address", addressStr),
-		row("Registration Number", org.GetRegistrationNumber()),
+		row("Registration Number", derefOpt(org.GetRegistrationNumber())),
 		row("VAT Number", vatNumber),
 	}
 }

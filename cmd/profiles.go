@@ -406,7 +406,7 @@ func profileDetailRows(p *components.ProfileResponse) [][]string {
 		row("Website", p.GetWebsite()),
 		row("Email", p.GetEmail()),
 		row("Phone", p.GetPhone()),
-		row("Business Category", p.GetBusinessCategory()),
+		row("Business Category", derefOpt(p.GetBusinessCategory())),
 		row("Status", string(p.GetStatus())),
 		row("Created At", p.GetCreatedAt()),
 	}
