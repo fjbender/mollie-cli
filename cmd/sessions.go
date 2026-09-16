@@ -1,20 +1,16 @@
 package cmd
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"math"
-	"net/http"
 	"strconv"
 	"strings"
 
-	"github.com/fjbender/mollie-cli/internal/config"
 	"github.com/fjbender/mollie-cli/internal/input"
 	"github.com/fjbender/mollie-cli/internal/mollieclient"
 	"github.com/fjbender/mollie-cli/internal/output"
-	"github.com/fjbender/mollie-cli/internal/verbose"
 	"github.com/mollie/mollie-api-golang/models/components"
 	"github.com/spf13/cobra"
 )
@@ -262,22 +258,19 @@ func runSessionsCreate(cmd *cobra.Command, _ []string) error {
 	if sessCreateWithShipping {
 		req.ShippingAddress = buildSessionShippingAddress()
 	}
-
-	var sess *components.SessionResponse
-	if len(requiredCustomerDetails) == 0 {
-		resp, err := client.Sessions.Create(context.Background(), nil, req)
-		if err != nil {
-			return fmt.Errorf("creating session: %w", err)
+	if len(requiredCustomerDetails) > 0 {
+		details := make([]components.SessionRequiredCustomerDetails, len(requiredCustomerDetails))
+		for i, d := range requiredCustomerDetails {
+			details[i] = components.SessionRequiredCustomerDetails(d)
 		}
-		sess = resp.GetSessionResponse()
-	} else {
-		// requiredCustomerDetails is not yet supported by the SDK's
-		// SessionRequest — see createSessionRaw.
-		sess, err = createSessionRaw(context.Background(), req, requiredCustomerDetails)
-		if err != nil {
-			return fmt.Errorf("creating session: %w", err)
-		}
+		req.RequiredCustomerDetails = details
 	}
+
+	resp, err := client.CheckoutSessions.Create(context.Background(), nil, req)
+	if err != nil {
+		return fmt.Errorf("creating session: %w", err)
+	}
+	sess := resp.GetSessionResponse()
 	if sess == nil {
 		return fmt.Errorf("unexpected empty response from API")
 	}
@@ -310,7 +303,7 @@ func runSessionsGet(_ *cobra.Command, args []string) error {
 		return err
 	}
 
-	resp, err := client.Sessions.Get(context.Background(), args[0], nil)
+	resp, err := client.CheckoutSessions.Get(context.Background(), args[0], nil)
 	if err != nil {
 		return fmt.Errorf("getting session: %w", err)
 	}
@@ -378,10 +371,10 @@ func sessionDetailRows(s *components.SessionResponse) [][]string {
 	}
 }
 
-// buildSessionBillingAddress builds a PaymentAddress for session billing
+// buildSessionBillingAddress builds a ShippingAddress for session billing
 // using the same NL test-mode defaults as the payments command.
-func buildSessionBillingAddress() *components.PaymentAddress {
-	addr := &components.PaymentAddress{
+func buildSessionBillingAddress() *components.ShippingAddress {
+	addr := &components.ShippingAddress{
 		GivenName:       overrideOrDefault(defaultAddrGivenName, sessCreateBillingGivenName),
 		FamilyName:      overrideOrDefault(defaultAddrFamilyName, sessCreateBillingFamilyName),
 		Email:           overrideOrDefault(defaultAddrEmail, sessCreateBillingEmail),
@@ -405,10 +398,10 @@ func buildSessionBillingAddress() *components.PaymentAddress {
 	return addr
 }
 
-// buildSessionShippingAddress builds a PaymentAddress for session shipping
+// buildSessionShippingAddress builds a ShippingAddress for session shipping
 // using the same NL test-mode defaults as the payments command.
-func buildSessionShippingAddress() *components.PaymentAddress {
-	addr := &components.PaymentAddress{
+func buildSessionShippingAddress() *components.ShippingAddress {
+	addr := &components.ShippingAddress{
 		GivenName:       overrideOrDefault(defaultAddrGivenName, sessCreateShippingGivenName),
 		FamilyName:      overrideOrDefault(defaultAddrFamilyName, sessCreateShippingFamilyName),
 		Email:           overrideOrDefault(defaultAddrEmail, sessCreateShippingEmail),
@@ -606,98 +599,3 @@ func parseRequiredCustomerDetails(raw string) ([]string, error) {
 	return values, nil
 }
 
-// createSessionRaw creates a session via a raw HTTP request rather than the
-// SDK's client.Sessions.Create, because mollie-api-golang's SessionRequest
-// does not yet support requiredCustomerDetails — a newer field the Go SDK
-// hasn't caught up with. It re-serializes req (built exactly as it would be
-// for the SDK call) and merges in requiredCustomerDetails before sending.
-//
-// For organization access tokens, the SDK also auto-injects profileId and
-// testmode into the request body via an internal BeforeRequest hook (see
-// mollie-api-golang's internal/hooks/molliehooks.go) — API keys don't need
-// this since they're already mode/profile-scoped. That hook only runs for
-// client.Sessions.Create, so it's replicated here to keep this path at
-// parity.
-//
-// Drop this in favour of the plain client.Sessions.Create call once the SDK
-// adds the field.
-func createSessionRaw(ctx context.Context, req *components.SessionRequest, requiredCustomerDetails []string) (*components.SessionResponse, error) {
-	body, err := json.Marshal(req)
-	if err != nil {
-		return nil, err
-	}
-	var fields map[string]any
-	if err := json.Unmarshal(body, &fields); err != nil {
-		return nil, err
-	}
-	fields["requiredCustomerDetails"] = requiredCustomerDetails
-
-	key := cfg.APIKey
-	if flagAPIKey != "" {
-		key = flagAPIKey
-	}
-	if key == "" {
-		return nil, fmt.Errorf("no API key configured — run `mollie auth setup` to get started")
-	}
-
-	if !config.IsAPIKey(key) {
-		if _, exists := fields["profileId"]; !exists {
-			resolvedProfile := cfg.ProfileID
-			if flagProfile != "" {
-				resolvedProfile = flagProfile
-			}
-			if resolvedProfile != "" {
-				fields["profileId"] = resolvedProfile
-			}
-		}
-		if _, exists := fields["testmode"]; !exists {
-			fields["testmode"] = !flagLive
-		}
-	}
-
-	body, err = json.Marshal(fields)
-	if err != nil {
-		return nil, err
-	}
-
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, mollieAPIV2+"/sessions", bytes.NewReader(body))
-	if err != nil {
-		return nil, err
-	}
-	httpReq.Header.Set("Authorization", "Bearer "+key)
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Accept", "application/hal+json")
-	httpReq.Header.Set("User-Agent", "Mollie-CLI/1.0.0")
-
-	transport := http.DefaultTransport
-	if flagVerbose > 0 {
-		transport = &verbose.LoggingTransport{Level: flagVerbose, Inner: transport}
-	}
-	httpClient := &http.Client{Transport: transport}
-
-	resp, err := httpClient.Do(httpReq)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode >= 400 {
-		var apiErr struct {
-			Status int    `json:"status"`
-			Title  string `json:"title"`
-			Detail string `json:"detail"`
-		}
-		_ = json.NewDecoder(resp.Body).Decode(&apiErr)
-		msg := apiErr.Title
-		if apiErr.Detail != "" {
-			msg += " — " + apiErr.Detail
-		}
-		return nil, fmt.Errorf("API error %d: %s", resp.StatusCode, msg)
-	}
-
-	var sess components.SessionResponse
-	if err := json.NewDecoder(resp.Body).Decode(&sess); err != nil {
-		return nil, err
-	}
-	return &sess, nil
-}

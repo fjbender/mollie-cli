@@ -183,7 +183,7 @@ func runSettlementsGet(_ *cobra.Command, args []string) error {
 		output.PrintTable(
 			[]string{"FIELD", "VALUE"},
 			[][]string{
-				{"ID", s.GetID()},
+				{"ID", string(s.GetID())},
 				{"Reference", derefOpt(s.GetReference())},
 				{"Status", string(s.GetStatus())},
 				{"Amount", amt.GetCurrency() + " " + amt.GetValue()},
@@ -208,7 +208,7 @@ func runSettlementsOpen(_ *cobra.Command, _ []string) error {
 	if err != nil {
 		return fmt.Errorf("getting open settlement: %w", err)
 	}
-	s := resp.GetEntitySettlement()
+	s := resp.GetObject()
 	if s == nil {
 		return fmt.Errorf("unexpected empty response from API")
 	}
@@ -221,7 +221,7 @@ func runSettlementsOpen(_ *cobra.Command, _ []string) error {
 		output.PrintTable(
 			[]string{"FIELD", "VALUE"},
 			[][]string{
-				{"ID", s.GetID()},
+				{"ID", string(s.GetID())},
 				{"Reference", derefOpt(s.GetReference())},
 				{"Status", string(s.GetStatus())},
 				{"Amount", amt.GetCurrency() + " " + amt.GetValue()},
@@ -244,7 +244,7 @@ func runSettlementsNext(_ *cobra.Command, _ []string) error {
 	if err != nil {
 		return fmt.Errorf("getting next settlement: %w", err)
 	}
-	s := resp.GetEntitySettlement()
+	s := resp.GetObject()
 	if s == nil {
 		return fmt.Errorf("unexpected empty response from API")
 	}
@@ -257,7 +257,7 @@ func runSettlementsNext(_ *cobra.Command, _ []string) error {
 		output.PrintTable(
 			[]string{"FIELD", "VALUE"},
 			[][]string{
-				{"ID", s.GetID()},
+				{"ID", string(s.GetID())},
 				{"Reference", derefOpt(s.GetReference())},
 				{"Status", string(s.GetStatus())},
 				{"Amount", amt.GetCurrency() + " " + amt.GetValue()},
@@ -356,8 +356,8 @@ func runSettlementsRefunds(_ *cobra.Command, args []string) error {
 				r.GetID(),
 				string(r.GetStatus()),
 				amt.Currency + " " + amt.Value,
-				r.GetDescription(),
-				derefOpt(r.GetPaymentID()),
+				derefOpt(r.GetDescription()),
+				r.GetPaymentID(),
 			})
 		}
 		output.PrintTable(

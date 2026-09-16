@@ -156,7 +156,7 @@ func runRefundsCreate(cmd *cobra.Command, args []string) error {
 	}
 
 	req := &components.RefundRequest{
-		Description: refCreateDescription,
+		Description: &refCreateDescription,
 		Amount: components.Amount{
 			Currency: refCreateCurrency,
 			Value:    refCreateAmount,
@@ -167,7 +167,7 @@ func runRefundsCreate(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("creating refund: %w", err)
 	}
-	ref := resp.GetEntityRefundResponse()
+	ref := resp.GetRefundResponse()
 	if ref == nil {
 		return fmt.Errorf("unexpected empty response from API")
 	}
@@ -182,8 +182,8 @@ func runRefundsCreate(cmd *cobra.Command, args []string) error {
 				ref.GetID(),
 				string(ref.GetStatus()),
 				formatAmount(ref.GetAmount()),
-				ref.GetDescription(),
-				derefOpt(ref.GetPaymentID()),
+				derefOpt(ref.GetDescription()),
+				ref.GetPaymentID(),
 			}},
 			!flagLive,
 		)
@@ -227,7 +227,7 @@ func runRefundsList(_ *cobra.Command, args []string) error {
 				string(r.GetStatus()),
 				formatAmount(r.GetAmount()),
 				r.GetCreatedAt(),
-				r.GetDescription(),
+				derefOpt(r.GetDescription()),
 			})
 		}
 		output.PrintTable(
@@ -274,7 +274,7 @@ func runRefundsListAll(_ *cobra.Command, _ []string) error {
 				string(r.GetStatus()),
 				formatAmount(r.GetAmount()),
 				r.GetCreatedAt(),
-				r.GetDescription(),
+				derefOpt(r.GetDescription()),
 			})
 		}
 		output.PrintTable(
@@ -299,7 +299,7 @@ func runRefundsGet(_ *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("getting refund: %w", err)
 	}
-	ref := resp.GetEntityRefundResponse()
+	ref := resp.GetRefundResponse()
 	if ref == nil {
 		return fmt.Errorf("refund not found")
 	}
@@ -351,24 +351,18 @@ func runRefundsCancel(_ *cobra.Command, args []string) error {
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
-// refundDetailRows converts an EntityRefundResponse into the key/value rows
-// shown by `refunds get` in table mode.
-func refundDetailRows(r *components.EntityRefundResponse) [][]string {
+// refundDetailRows converts a RefundResponse into the key/value rows shown by
+// `refunds get` in table mode.
+func refundDetailRows(r *components.RefundResponse) [][]string {
 	row := func(k, v string) []string { return []string{k, v} }
-
-	settlementAmt := "—"
-	if a := r.GetSettlementAmount(); a != nil {
-		settlementAmt = fmt.Sprintf("%s %s", a.GetValue(), a.GetCurrency())
-	}
 
 	return [][]string{
 		row("ID", r.GetID()),
 		row("Mode", string(r.GetMode())),
 		row("Status", string(r.GetStatus())),
 		row("Amount", formatAmount(r.GetAmount())),
-		row("Settlement Amount", settlementAmt),
-		row("Description", r.GetDescription()),
-		row("Payment ID", derefOpt(r.GetPaymentID())),
+		row("Description", derefOpt(r.GetDescription())),
+		row("Payment ID", r.GetPaymentID()),
 		row("Settlement ID", derefOpt(r.GetSettlementID())),
 		row("Created At", r.GetCreatedAt()),
 	}
