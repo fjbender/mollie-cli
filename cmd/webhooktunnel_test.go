@@ -215,6 +215,40 @@ func TestAppendEventLog_AppendsRatherThanTruncating(t *testing.T) {
 	}
 }
 
+func TestNewTunnelProvider_UnknownKindErrors(t *testing.T) {
+	_, err := newTunnelProvider("bogus", "")
+	if err == nil {
+		t.Fatal("expected an error for an unknown --tunnel value")
+	}
+	if !strings.Contains(err.Error(), "bogus") {
+		t.Errorf("error = %v, want it to mention the invalid value", err)
+	}
+}
+
+func TestNewTunnelProvider_ExternalWithoutPublicURLErrors(t *testing.T) {
+	_, err := newTunnelProvider("external", "")
+	if err == nil {
+		t.Fatal("expected an error when --tunnel external is used without --public-url")
+	}
+}
+
+func TestNewTunnelProvider_ExternalWithPublicURLSucceeds(t *testing.T) {
+	p, err := newTunnelProvider("external", "https://webhooks.example.com")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if p == nil {
+		t.Fatal("expected a non-nil provider")
+	}
+}
+
+func TestNewTunnelProvider_CloudflaredWithPublicURLErrors(t *testing.T) {
+	_, err := newTunnelProvider("cloudflared", "https://webhooks.example.com")
+	if err == nil {
+		t.Fatal("expected an error when --public-url is set together with --tunnel cloudflared")
+	}
+}
+
 func TestCombineEventHandlers_CallsAllInOrder(t *testing.T) {
 	var calls []string
 	a := func(webhookserver.Event) { calls = append(calls, "a") }

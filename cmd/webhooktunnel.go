@@ -34,14 +34,18 @@ var (
 	whtPort       int
 	whtEventTypes string
 	whtLogFile    string
+	whtTunnel     string
+	whtPublicURL  string
 )
 
 var webhookTunnelCmd = &cobra.Command{
 	Use:   "webhook-tunnel",
 	Short: "Tunnel Mollie test-mode webhook events to your terminal",
-	Long: `Spins up a public cloudflared tunnel to a local HTTP server, points a
-Mollie test-mode webhook subscription at it, and logs every incoming event
-until you press Ctrl-C. Test mode only — live mode is not yet supported.`,
+	Long: `Spins up a public tunnel to a local HTTP server — a cloudflared quick
+tunnel by default, or a URL you already have routed to --port yourself via
+--tunnel external — points a Mollie test-mode webhook subscription at it,
+and logs every incoming event until you press Ctrl-C. Test mode only — live
+mode is not yet supported.`,
 	RunE: runWebhookTunnel,
 }
 
@@ -49,6 +53,8 @@ func init() {
 	webhookTunnelCmd.Flags().IntVar(&whtPort, "port", 10153, "Local port for the tunnel's HTTP server")
 	webhookTunnelCmd.Flags().StringVar(&whtEventTypes, "event-types", "", `Comma-separated event types to subscribe to (default: every event type this credential can access)`)
 	webhookTunnelCmd.Flags().StringVar(&whtLogFile, "logfile", "/tmp/mollie-webhook-log", "File to append a raw log of every incoming webhook HTTP call to (method, URL, headers, body, timestamp)")
+	webhookTunnelCmd.Flags().StringVar(&whtTunnel, "tunnel", "cloudflared", `Tunnel provider: "cloudflared" (spawns a cloudflared quick tunnel) or "external" (use a public URL you already have routed to --port yourself, e.g. via an SSH reverse tunnel)`)
+	webhookTunnelCmd.Flags().StringVar(&whtPublicURL, "public-url", "", "Publicly reachable URL already routed to --port; required when --tunnel external")
 
 	rootCmd.AddCommand(webhookTunnelCmd)
 }
@@ -65,6 +71,30 @@ func cloudflaredInstallHint() string {
 		return "Install it with: winget install --exact --id Cloudflare.cloudflared\nor download a binary from https://github.com/cloudflare/cloudflared/releases"
 	default:
 		return "Download a binary for your platform from https://github.com/cloudflare/cloudflared/releases"
+	}
+}
+
+// newTunnelProvider builds the tunnel.Provider selected by --tunnel,
+// validating the flag combination before anything else in
+// runWebhookTunnel touches the network or the local port.
+func newTunnelProvider(kind, publicURL string) (tunnel.Provider, error) {
+	switch kind {
+	case "cloudflared":
+		if publicURL != "" {
+			return nil, errors.New("--public-url can only be used with --tunnel external")
+		}
+		cloudflaredPath, err := exec.LookPath("cloudflared")
+		if err != nil {
+			return nil, fmt.Errorf("cloudflared not found on PATH: %w\n\n%s", err, cloudflaredInstallHint())
+		}
+		return tunnel.NewCloudflaredProvider(cloudflaredPath, 20*time.Second), nil
+	case "external":
+		if publicURL == "" {
+			return nil, errors.New("--public-url is required when --tunnel external")
+		}
+		return tunnel.NewExternalProvider(publicURL), nil
+	default:
+		return nil, fmt.Errorf("unknown --tunnel value %q (want \"cloudflared\" or \"external\")", kind)
 	}
 }
 
@@ -317,9 +347,9 @@ func runWebhookTunnel(_ *cobra.Command, _ []string) error {
 		return errors.New("webhook-tunnel only supports test mode for now — it won't run against a live-mode credential")
 	}
 
-	cloudflaredPath, err := exec.LookPath("cloudflared")
+	provider, err := newTunnelProvider(whtTunnel, whtPublicURL)
 	if err != nil {
-		return fmt.Errorf("cloudflared not found on PATH: %w\n\n%s", err, cloudflaredInstallHint())
+		return err
 	}
 
 	// Bind the local port up front, before anything with an external side
@@ -385,11 +415,11 @@ func runWebhookTunnel(_ *cobra.Command, _ []string) error {
 	}
 
 	fmt.Printf("Starting tunnel on port %d...\n", whtPort)
-	t, err := tunnel.Start(ctx, cloudflaredPath, whtPort, 20*time.Second)
+	tunnelURL, err := provider.Start(ctx, whtPort)
 	if err != nil {
-		return fmt.Errorf("starting cloudflared tunnel: %w", err)
+		return fmt.Errorf("starting tunnel: %w", err)
 	}
-	fmt.Printf("✓ Tunnel ready: %s\n", t.URL)
+	fmt.Printf("✓ Tunnel ready: %s\n", tunnelURL)
 
 	// The local server must already be serving before the subscription is
 	// created/patched below — Mollie's create/update validates the URL
@@ -426,7 +456,7 @@ func runWebhookTunnel(_ *cobra.Command, _ []string) error {
 
 		body := whCreateBody{
 			Name:       "mollie-cli webhook-tunnel",
-			URL:        t.URL,
+			URL:        tunnelURL,
 			EventTypes: eventTypes,
 		}
 		if c.needsTestmode() {
@@ -507,7 +537,7 @@ func runWebhookTunnel(_ *cobra.Command, _ []string) error {
 			return fmt.Errorf("saving tunnel state: %w", err)
 		}
 
-		patchBody := whUpdateBody{URL: &t.URL}
+		patchBody := whUpdateBody{URL: &tunnelURL}
 		if whtEventTypes != "" {
 			patchBody.EventTypes = eventTypes
 		}
@@ -561,7 +591,7 @@ func runWebhookTunnel(_ *cobra.Command, _ []string) error {
 		fmt.Fprintf(os.Stderr, "warning: failed to save tunnel state: %v\n", err)
 	}
 
-	_ = t.Wait() // cloudflared is killed automatically because ctx was canceled
+	_ = provider.Wait() // underlying subprocess (if any) is killed/unblocked because ctx was canceled
 
 	return nil
 }
