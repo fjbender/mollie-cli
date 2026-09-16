@@ -461,6 +461,33 @@ mollie invoices list
 mollie invoices get <invoice-id>
 ```
 
+### `sales-invoices` — sales invoices
+
+```
+mollie sales-invoices create [flags]
+mollie sales-invoices list [--limit N] [--from <sales-invoice-id>]
+mollie sales-invoices get <sales-invoice-id>
+mollie sales-invoices update <sales-invoice-id> [flags]
+mollie sales-invoices delete <sales-invoice-id> [--confirm]
+```
+
+`create` requires `--recipient-identifier`, a recipient, and at least one line item:
+
+```bash
+mollie sales-invoices create \
+  --recipient-identifier "cust-0123" \
+  --recipient-type business --recipient-org-name "Acme Corp" --recipient-org-number "12345678" \
+  --recipient-email "billing@acme.example" --recipient-street "Keizersgracht 126" \
+  --recipient-postal-code "1015 CW" --recipient-city "Amsterdam" --recipient-country NL --recipient-locale nl_NL \
+  --line-description "Widget" --line-quantity 2 --line-vat-rate 21.00 --line-unit-price 10.00
+```
+
+- **Recipient** (`--recipient-*`): `--recipient-type` (`consumer`|`business`) plus name/address/contact fields — mirrors the `--billing-*`/`--shipping-*` address flags on `payments create`.
+- **Line items** (`--line-*`): the flags build a single line item, covering the common one-line invoice. For multiple lines, pipe a JSON body with a `"lines"` array via stdin instead (see [JSON stdin](#json-stdin)) — this only applies when `--line-description` was not set.
+- **Discount** (`--discount-type`, `--discount-value`), **payment details** (`--payment-source`, `--payment-source-reference`; required if `--status paid`), and **email details** (`--email-subject`, `--email-body`; sends the invoice by email) are all optional and follow the same flags-first/stdin-fallback rule as the recipient and lines.
+- `update` accepts the same flags (minus `--status`'s `draft` default — pass any of `draft`, `issued`, `paid`, `cancelled`) as a partial update; only the fields you set are sent.
+- `delete` only works on invoices in `draft` status.
+
 ### `sessions` — sessions _(beta)_
 
 Sessions support checkout flows built with Mollie Components. Supports the same `--with-lines`, `--with-discount`, `--with-billing`, and `--with-shipping` flags as `payments create` — see the [payments create advanced flags](#payments-create-advanced-flags) section for details. The Sessions API specification may still change.
