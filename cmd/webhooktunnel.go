@@ -306,7 +306,7 @@ func appendEventLog(path string, ev webhookserver.Event) error {
 	if err != nil {
 		return fmt.Errorf("opening webhook log file: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	var b strings.Builder
 	fmt.Fprintf(&b, "=== %s ===\n", ev.ReceivedAt.Format(time.RFC3339))
