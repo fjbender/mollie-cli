@@ -12,9 +12,11 @@ import (
 )
 
 // GlobalEventPermissions maps every documented "global" Next-gen Webhook
-// event type to the permission required to receive it. Beta event types
-// (dispute.*, file.*, unmatched-credit-transfer.*, connect-balance-transfer.*)
-// are deliberately excluded — see the design doc.
+// event type to the permission required to receive it, plus the
+// payment/refund/capture/chargeback event types now that Mollie has moved
+// those out of restricted beta into public beta. Event types still gated
+// behind a support request (dispute.*, file.*, unmatched-credit-transfer.*,
+// connect-balance-transfer.*) are deliberately excluded — see the design doc.
 var GlobalEventPermissions = map[string]string{
 	"payment-link.paid":                        "payment-links.read",
 	"balance-transaction.created":              "balances.read",
@@ -34,6 +36,22 @@ var GlobalEventPermissions = map[string]string{
 	"payout.processing-at-bank":                "payouts.read",
 	"payout.canceled":                          "payouts.read",
 	"payout.failed":                            "payouts.read",
+	"payment.paid":                             "payments.read",
+	"payment.authorized":                       "payments.read",
+	"payment.failed":                           "payments.read",
+	"payment.canceled":                         "payments.read",
+	"payment.expired":                          "payments.read",
+	"payment.pending":                          "payments.read",
+	"refund.queued":                            "payments.read",
+	"refund.pending":                           "payments.read",
+	"refund.processing":                        "payments.read",
+	"refund.refunded":                          "payments.read",
+	"refund.failed":                            "payments.read",
+	"refund.canceled":                          "payments.read",
+	"capture.succeeded":                        "payments.read",
+	"capture.failed":                           "payments.read",
+	"chargeback.received":                      "payments.read",
+	"chargeback.reversed":                      "payments.read",
 }
 
 // PermissionLister is the subset of the Mollie SDK's Permissions client that

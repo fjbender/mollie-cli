@@ -61,6 +61,53 @@ func TestResolve_AccessTokenFiltersByGrantedPermissions(t *testing.T) {
 	}
 }
 
+func TestResolve_AccessTokenIncludesPaymentEventsForPaymentsReadPermission(t *testing.T) {
+	lister := &fakeLister{
+		resp: &operations.ListPermissionsResponse{
+			Object: &operations.ListPermissionsResponseBody{
+				Embedded: operations.ListPermissionsEmbedded{
+					Permissions: []components.ListEntityPermission{
+						{ID: "payments.read", Granted: true},
+					},
+				},
+			},
+		},
+	}
+
+	got, err := webhookevents.Resolve(context.Background(), false, lister)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	want := []string{
+		"capture.failed",
+		"capture.succeeded",
+		"chargeback.received",
+		"chargeback.reversed",
+		"payment.authorized",
+		"payment.canceled",
+		"payment.expired",
+		"payment.failed",
+		"payment.paid",
+		"payment.pending",
+		"refund.canceled",
+		"refund.failed",
+		"refund.pending",
+		"refund.processing",
+		"refund.queued",
+		"refund.refunded",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %d event types %v, want %d %v", len(got), got, len(want), want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("got %v, want %v", got, want)
+			break
+		}
+	}
+}
+
 func TestResolve_AccessTokenNoGrantedPermissionsReturnsEmpty(t *testing.T) {
 	lister := &fakeLister{
 		resp: &operations.ListPermissionsResponse{
