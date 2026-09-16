@@ -1,53 +1,83 @@
 package cmd
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"net/http"
-	"net/url"
 	"strings"
 
 	"github.com/charmbracelet/huh"
-	"github.com/fjbender/mollie-cli/internal/config"
+	"github.com/fjbender/mollie-cli/internal/mollieclient"
 	"github.com/fjbender/mollie-cli/internal/output"
 	"github.com/fjbender/mollie-cli/internal/prompt"
-	"github.com/fjbender/mollie-cli/internal/verbose"
+	"github.com/mollie/mollie-api-golang/models/components"
+	"github.com/mollie/mollie-api-golang/models/operations"
 	"github.com/spf13/cobra"
 )
 
-const mollieAPIV2 = "https://api.mollie.com/v2"
-
-// Internal response types use plain strings for eventTypes so we aren't
-// bound to the SDK's incomplete WebhookEventTypes enum.
-
+// whWebhook is a normalized view over the SDK's three distinct-but-
+// identically-shaped webhook response types (CreateWebhook, EntityWebhook,
+// ListEntityWebhook — Speakeasy generates no shared interface between them),
+// used for table rendering and by the webhook-tunnel command's subscription
+// bookkeeping.
 type whWebhook struct {
-	ID            string   `json:"id"`
-	Name          string   `json:"name"`
-	URL           string   `json:"url"`
-	ProfileID     *string  `json:"profileId"`
-	CreatedAt     string   `json:"createdAt"`
-	EventTypes    []string `json:"eventTypes"`
-	Status        string   `json:"status"`
-	Mode          string   `json:"mode"`
-	WebhookSecret string   `json:"webhookSecret,omitempty"`
+	ID            string
+	Name          string
+	URL           string
+	ProfileID     *string
+	CreatedAt     string
+	EventTypes    []string
+	Status        string
+	Mode          string
+	WebhookSecret string
 }
 
-type whWebhookList struct {
-	Count    int64 `json:"count"`
-	Embedded struct {
-		Webhooks []whWebhook `json:"webhooks"`
-	} `json:"_embedded"`
+func fromCreateWebhook(w *components.CreateWebhook) whWebhook {
+	return whWebhook{
+		ID:            w.GetID(),
+		Name:          w.GetName(),
+		URL:           w.GetURL(),
+		ProfileID:     w.GetProfileID(),
+		CreatedAt:     w.GetCreatedAt(),
+		EventTypes:    eventTypesToStrings(w.GetEventTypes()),
+		Status:        string(w.GetStatus()),
+		Mode:          string(w.GetMode()),
+		WebhookSecret: w.GetWebhookSecret(),
+	}
 }
 
-type whEvent struct {
-	ID        string `json:"id"`
-	Type      string `json:"type"`
-	EntityID  string `json:"entityId"`
-	CreatedAt string `json:"createdAt"`
+func fromEntityWebhook(w *components.EntityWebhook) whWebhook {
+	return whWebhook{
+		ID:         w.GetID(),
+		Name:       w.GetName(),
+		URL:        w.GetURL(),
+		ProfileID:  w.GetProfileID(),
+		CreatedAt:  w.GetCreatedAt(),
+		EventTypes: eventTypesToStrings(w.GetEventTypes()),
+		Status:     string(w.GetStatus()),
+		Mode:       string(w.GetMode()),
+	}
+}
+
+func fromListEntityWebhook(w components.ListEntityWebhook) whWebhook {
+	return whWebhook{
+		ID:         w.GetID(),
+		Name:       w.GetName(),
+		URL:        w.GetURL(),
+		ProfileID:  w.GetProfileID(),
+		CreatedAt:  w.GetCreatedAt(),
+		EventTypes: eventTypesToStrings(w.GetEventTypes()),
+		Status:     string(w.GetStatus()),
+		Mode:       string(w.GetMode()),
+	}
+}
+
+func eventTypesToStrings(types []components.WebhookEventTypes) []string {
+	out := make([]string, len(types))
+	for i, t := range types {
+		out[i] = string(t)
+	}
+	return out
 }
 
 // ── flag value holders ────────────────────────────────────────────────────────
@@ -165,141 +195,44 @@ func init() {
 	rootCmd.AddCommand(webhooksCmd)
 }
 
-// ── HTTP client ───────────────────────────────────────────────────────────────
+// ── event-type conversion helpers ────────────────────────────────────────────
 
-// whClient makes authenticated Mollie API calls with our own response types,
-// sidestepping the SDK's incomplete WebhookEventTypes enum.
-type whClient struct {
-	http     *http.Client
-	apiKey   string
-	isAPIKey bool // true for test_/live_ keys; false for access tokens
-}
-
-func newWhClient() *whClient {
-	key := cfg.APIKey
-	if flagAPIKey != "" {
-		key = flagAPIKey
-	}
-
-	transport := http.DefaultTransport
-	if flagVerbose > 0 {
-		transport = &verbose.LoggingTransport{Level: flagVerbose, Inner: transport}
-	}
-
-	return &whClient{
-		http:     &http.Client{Transport: transport},
-		apiKey:   key,
-		isAPIKey: config.IsAPIKey(key),
-	}
-}
-
-// needsTestmode reports whether testmode must be explicitly requested.
-// Only relevant for access tokens — API keys encode mode in their prefix.
-func (c *whClient) needsTestmode() bool {
-	return !c.isAPIKey && !flagLive
-}
-
-// testmodeBody returns a body containing testmode=true for access-token test
-// calls, or nil (no body) otherwise.
-func (c *whClient) testmodeBody() *whTestmodeBody {
-	if c.needsTestmode() {
-		t := true
-		return &whTestmodeBody{Testmode: &t}
-	}
-	return nil
-}
-
-// get fetches a resource and decodes the JSON response into result.
-func (c *whClient) get(ctx context.Context, path string, query url.Values, result any) error {
-	if c.needsTestmode() {
-		if query == nil {
-			query = url.Values{}
+// parseWebhookEventTypes splits a comma-separated string into individual event types.
+func parseWebhookEventTypes(s string) []string {
+	parts := strings.Split(s, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if t := strings.TrimSpace(p); t != "" {
+			out = append(out, t)
 		}
-		query.Set("testmode", "true")
 	}
-	return c.do(ctx, http.MethodGet, path, query, nil, result)
+	return out
 }
 
-// mutate sends a POST/PATCH/DELETE request with an optional JSON body.
-func (c *whClient) mutate(ctx context.Context, method, path string, body, result any) error {
-	return c.do(ctx, method, path, nil, body, result)
+// toCreateEventTypes converts parsed event-type strings into the SDK's
+// create-webhook union type: a bare wildcard is sent as a scalar value,
+// anything else as an array.
+func toCreateEventTypes(types []string) operations.CreateWebhookEventTypes {
+	if len(types) == 1 && types[0] == string(components.WebhookEventTypesWildcard) {
+		return operations.CreateCreateWebhookEventTypesWebhookEventTypes(components.WebhookEventTypesWildcard)
+	}
+	arr := make([]components.WebhookEventTypes, len(types))
+	for i, t := range types {
+		arr[i] = components.WebhookEventTypes(t)
+	}
+	return operations.CreateCreateWebhookEventTypesArrayOfWebhookEventTypes(arr)
 }
 
-func (c *whClient) do(ctx context.Context, method, path string, query url.Values, body, result any) error {
-	u, err := url.Parse(mollieAPIV2 + path)
-	if err != nil {
-		return err
+// toUpdateEventTypes is the update-webhook equivalent of toCreateEventTypes.
+func toUpdateEventTypes(types []string) operations.UpdateWebhookEventTypes {
+	if len(types) == 1 && types[0] == string(components.WebhookEventTypesWildcard) {
+		return operations.CreateUpdateWebhookEventTypesWebhookEventTypes(components.WebhookEventTypesWildcard)
 	}
-	if len(query) > 0 {
-		u.RawQuery = query.Encode()
+	arr := make([]components.WebhookEventTypes, len(types))
+	for i, t := range types {
+		arr[i] = components.WebhookEventTypes(t)
 	}
-
-	var bodyReader io.Reader
-	if body != nil {
-		b, err := json.Marshal(body)
-		if err != nil {
-			return err
-		}
-		bodyReader = bytes.NewReader(b)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, method, u.String(), bodyReader)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Authorization", "Bearer "+c.apiKey)
-	req.Header.Set("User-Agent", "Mollie-CLI/1.0.0")
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	if !c.isAPIKey && flagProfile != "" {
-		req.Header.Set("X-Profile-Id", flagProfile)
-	}
-
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode >= 400 {
-		var apiErr struct {
-			Status int    `json:"status"`
-			Title  string `json:"title"`
-			Detail string `json:"detail"`
-		}
-		_ = json.NewDecoder(resp.Body).Decode(&apiErr)
-		msg := apiErr.Title
-		if apiErr.Detail != "" {
-			msg += " — " + apiErr.Detail
-		}
-		return fmt.Errorf("API error %d: %s", resp.StatusCode, msg)
-	}
-
-	if result != nil && resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusAccepted {
-		return json.NewDecoder(resp.Body).Decode(result)
-	}
-	return nil
-}
-
-// ── request body types ────────────────────────────────────────────────────────
-
-type whCreateBody struct {
-	Name       string   `json:"name"`
-	URL        string   `json:"url"`
-	EventTypes []string `json:"eventTypes"`
-	Testmode   *bool    `json:"testmode,omitempty"`
-}
-
-type whUpdateBody struct {
-	Name       *string  `json:"name,omitempty"`
-	URL        *string  `json:"url,omitempty"`
-	EventTypes []string `json:"eventTypes,omitempty"`
-	Testmode   *bool    `json:"testmode,omitempty"`
-}
-
-type whTestmodeBody struct {
-	Testmode *bool `json:"testmode,omitempty"`
+	return operations.CreateUpdateWebhookEventTypesArrayOfWebhookEventTypes(arr)
 }
 
 // ── handlers ──────────────────────────────────────────────────────────────────
@@ -314,21 +247,24 @@ func runWebhooksCreate(_ *cobra.Command, _ []string) error {
 		return fmt.Errorf("required flag \"event-types\" not set")
 	}
 
-	c := newWhClient()
+	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile, flagVerbose)
+	if err != nil {
+		return err
+	}
 
-	body := whCreateBody{
+	body := &operations.CreateWebhookRequestBody{
 		Name:       whCreateName,
 		URL:        whCreateURL,
-		EventTypes: parseWebhookEventTypes(whCreateEventTypes),
-	}
-	if c.needsTestmode() {
-		t := true
-		body.Testmode = &t
+		EventTypes: toCreateEventTypes(parseWebhookEventTypes(whCreateEventTypes)),
 	}
 
-	var wh whWebhook
-	if err := c.mutate(context.Background(), http.MethodPost, "/webhooks", body, &wh); err != nil {
+	resp, err := client.Webhooks.Create(context.Background(), nil, body)
+	if err != nil {
 		return fmt.Errorf("creating webhook: %w", err)
+	}
+	wh := resp.GetCreateWebhook()
+	if wh == nil {
+		return fmt.Errorf("unexpected empty response from API")
 	}
 
 	switch resolvedOutput() {
@@ -337,7 +273,7 @@ func runWebhooksCreate(_ *cobra.Command, _ []string) error {
 	default:
 		output.PrintTable(
 			[]string{"FIELD", "VALUE"},
-			webhookDetailRows(wh, true),
+			webhookDetailRows(fromCreateWebhook(wh), true),
 			!flagLive,
 		)
 	}
@@ -345,31 +281,43 @@ func runWebhooksCreate(_ *cobra.Command, _ []string) error {
 }
 
 func runWebhooksList(_ *cobra.Command, _ []string) error {
-	c := newWhClient()
+	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile, flagVerbose)
+	if err != nil {
+		return err
+	}
 
-	q := url.Values{}
-	q.Set("limit", fmt.Sprintf("%d", whListLimit))
+	req := operations.ListWebhooksRequest{
+		Limit: &whListLimit,
+	}
 	if whListFrom != "" {
-		q.Set("from", whListFrom)
+		req.From = &whListFrom
 	}
 	if whListSort != "" {
-		q.Set("sort", whListSort)
+		sort := components.Sorting(whListSort)
+		req.Sort = &sort
 	}
 	if whListEventTypes != "" {
-		q.Set("eventTypes", whListEventTypes)
+		et := components.WebhookEventTypes(whListEventTypes)
+		req.EventTypes = &et
 	}
 
-	var list whWebhookList
-	if err := c.get(context.Background(), "/webhooks", q, &list); err != nil {
+	resp, err := client.Webhooks.List(context.Background(), req)
+	if err != nil {
 		return fmt.Errorf("listing webhooks: %w", err)
+	}
+	if resp.Object == nil {
+		return nil
 	}
 
 	switch resolvedOutput() {
 	case output.FormatJSON:
-		return output.PrintJSON(list)
+		return output.PrintJSON(resp.Object)
 	default:
-		rows := make([][]string, 0, len(list.Embedded.Webhooks))
-		for _, wh := range list.Embedded.Webhooks {
+		embedded := resp.Object.GetEmbedded()
+		webhooks := embedded.GetWebhooks()
+		rows := make([][]string, 0, len(webhooks))
+		for _, w := range webhooks {
+			wh := fromListEntityWebhook(w)
 			rows = append(rows, []string{
 				wh.ID,
 				wh.Name,
@@ -390,11 +338,18 @@ func runWebhooksList(_ *cobra.Command, _ []string) error {
 }
 
 func runWebhooksGet(_ *cobra.Command, args []string) error {
-	c := newWhClient()
+	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile, flagVerbose)
+	if err != nil {
+		return err
+	}
 
-	var wh whWebhook
-	if err := c.get(context.Background(), "/webhooks/"+args[0], nil, &wh); err != nil {
+	resp, err := client.Webhooks.Get(context.Background(), args[0], nil, nil)
+	if err != nil {
 		return fmt.Errorf("getting webhook: %w", err)
+	}
+	wh := resp.GetEntityWebhook()
+	if wh == nil {
+		return fmt.Errorf("webhook not found")
 	}
 
 	switch resolvedOutput() {
@@ -403,7 +358,7 @@ func runWebhooksGet(_ *cobra.Command, args []string) error {
 	default:
 		output.PrintTable(
 			[]string{"FIELD", "VALUE"},
-			webhookDetailRows(wh, false),
+			webhookDetailRows(fromEntityWebhook(wh), false),
 			!flagLive,
 		)
 	}
@@ -411,9 +366,12 @@ func runWebhooksGet(_ *cobra.Command, args []string) error {
 }
 
 func runWebhooksUpdate(cmd *cobra.Command, args []string) error {
-	c := newWhClient()
+	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile, flagVerbose)
+	if err != nil {
+		return err
+	}
 
-	body := whUpdateBody{}
+	body := &operations.UpdateWebhookRequestBody{}
 	if cmd.Flags().Changed("name") {
 		body.Name = &whUpdateName
 	}
@@ -421,21 +379,18 @@ func runWebhooksUpdate(cmd *cobra.Command, args []string) error {
 		body.URL = &whUpdateURL
 	}
 	if cmd.Flags().Changed("event-types") {
-		body.EventTypes = parseWebhookEventTypes(whUpdateEventTypes)
-	}
-	if c.needsTestmode() {
-		t := true
-		body.Testmode = &t
+		et := toUpdateEventTypes(parseWebhookEventTypes(whUpdateEventTypes))
+		body.EventTypes = &et
 	}
 
-	var wh whWebhook
-	if err := c.mutate(context.Background(), http.MethodPatch, "/webhooks/"+args[0], body, &wh); err != nil {
+	resp, err := client.Webhooks.Update(context.Background(), args[0], nil, body)
+	if err != nil {
 		return fmt.Errorf("updating webhook: %w", err)
 	}
 
 	switch resolvedOutput() {
 	case output.FormatJSON:
-		return output.PrintJSON(wh)
+		return output.PrintJSON(resp.GetEntityWebhook())
 	default:
 		fmt.Printf("✓ Webhook %s updated\n", args[0])
 	}
@@ -460,8 +415,12 @@ func runWebhooksDelete(_ *cobra.Command, args []string) error {
 		}
 	}
 
-	c := newWhClient()
-	if err := c.mutate(context.Background(), http.MethodDelete, "/webhooks/"+webhookID, c.testmodeBody(), nil); err != nil {
+	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile, flagVerbose)
+	if err != nil {
+		return err
+	}
+
+	if _, err := client.Webhooks.Delete(context.Background(), webhookID, nil, nil); err != nil {
 		return fmt.Errorf("deleting webhook: %w", err)
 	}
 
@@ -470,8 +429,12 @@ func runWebhooksDelete(_ *cobra.Command, args []string) error {
 }
 
 func runWebhooksPing(_ *cobra.Command, args []string) error {
-	c := newWhClient()
-	if err := c.mutate(context.Background(), http.MethodPost, "/webhooks/"+args[0]+"/ping", c.testmodeBody(), nil); err != nil {
+	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile, flagVerbose)
+	if err != nil {
+		return err
+	}
+
+	if _, err := client.Webhooks.Test(context.Background(), args[0], nil, nil); err != nil {
 		return fmt.Errorf("pinging webhook: %w", err)
 	}
 
@@ -480,11 +443,18 @@ func runWebhooksPing(_ *cobra.Command, args []string) error {
 }
 
 func runWebhooksEventsGet(_ *cobra.Command, args []string) error {
-	c := newWhClient()
+	client, err := mollieclient.New(cfg, flagAPIKey, flagLive, flagProfile, flagVerbose)
+	if err != nil {
+		return err
+	}
 
-	var ev whEvent
-	if err := c.get(context.Background(), "/events/"+args[0], nil, &ev); err != nil {
+	resp, err := client.WebhookEvents.Get(context.Background(), args[0], nil, nil)
+	if err != nil {
 		return fmt.Errorf("getting webhook event: %w", err)
+	}
+	ev := resp.GetEntityWebhookEvent()
+	if ev == nil {
+		return fmt.Errorf("webhook event not found")
 	}
 
 	switch resolvedOutput() {
@@ -494,10 +464,10 @@ func runWebhooksEventsGet(_ *cobra.Command, args []string) error {
 		output.PrintTable(
 			[]string{"FIELD", "VALUE"},
 			[][]string{
-				{"ID", ev.ID},
-				{"Type", ev.Type},
-				{"Entity ID", ev.EntityID},
-				{"Created At", ev.CreatedAt},
+				{"ID", ev.GetID()},
+				{"Type", string(ev.GetWebhookEventTypes())},
+				{"Entity ID", ev.GetEntityID()},
+				{"Created At", ev.GetCreatedAt()},
 			},
 			!flagLive,
 		)
@@ -506,18 +476,6 @@ func runWebhooksEventsGet(_ *cobra.Command, args []string) error {
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
-
-// parseWebhookEventTypes splits a comma-separated string into individual event types.
-func parseWebhookEventTypes(s string) []string {
-	parts := strings.Split(s, ",")
-	out := make([]string, 0, len(parts))
-	for _, p := range parts {
-		if t := strings.TrimSpace(p); t != "" {
-			out = append(out, t)
-		}
-	}
-	return out
-}
 
 // summarizeEventTypes returns a compact label for table cells: a single event
 // type is shown verbatim; multiple are shown as "N types".
