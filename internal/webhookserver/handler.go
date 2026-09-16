@@ -10,6 +10,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -65,10 +66,17 @@ func Handler(secret string, onEvent func(Event)) http.Handler {
 	})
 }
 
-// verifySignature reports whether sig is a valid hex-encoded HMAC-SHA256
-// digest of body using secret, compared in constant time.
+// signaturePrefix is prepended by Mollie to every X-Mollie-Signature value,
+// e.g. "sha256=4a4c6f3ed4d15fee87ad44e07a7fa9b8...".
+const signaturePrefix = "sha256="
+
+// verifySignature reports whether sig is a valid "sha256="-prefixed,
+// hex-encoded HMAC-SHA256 digest of body using secret, compared in constant
+// time. A sig missing the prefix is rejected outright rather than compared,
+// since Mollie never sends one in that shape.
 func verifySignature(secret string, body []byte, sig string) bool {
-	if sig == "" {
+	sig, ok := strings.CutPrefix(sig, signaturePrefix)
+	if !ok {
 		return false
 	}
 	mac := hmac.New(sha256.New, []byte(secret))

@@ -13,10 +13,13 @@ import (
 	"github.com/fjbender/mollie-cli/internal/webhookserver"
 )
 
+// sign reproduces Mollie's real X-Mollie-Signature format: an HMAC-SHA256
+// hex digest of body prefixed with "sha256=", e.g.
+// "sha256=4a4c6f3ed4d15fee87ad44e07a7fa9b8...".
 func sign(secret, body string) string {
 	mac := hmac.New(sha256.New, []byte(secret))
 	mac.Write([]byte(body))
-	return hex.EncodeToString(mac.Sum(nil))
+	return "sha256=" + hex.EncodeToString(mac.Sum(nil))
 }
 
 func TestHandler_VerifiesCorrectSignature(t *testing.T) {
@@ -82,6 +85,28 @@ func TestHandler_MissingSignatureHeaderIsUnverified(t *testing.T) {
 
 	if got.Verified {
 		t.Error("expected event with no signature header to be unverified")
+	}
+}
+
+func TestHandler_RejectsSignatureMissingSha256Prefix(t *testing.T) {
+	const secret = "whsec_test"
+	body := `{"id":"event_1"}`
+
+	var got webhookserver.Event
+	handler := webhookserver.Handler(secret, func(e webhookserver.Event) { got = e })
+
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
+	// A correctly-computed digest without the "sha256=" prefix Mollie always
+	// sends — must still be rejected rather than matched.
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write([]byte(body))
+	req.Header.Set("X-Mollie-Signature", hex.EncodeToString(mac.Sum(nil)))
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if got.Verified {
+		t.Error("expected event without the sha256= prefix to be unverified")
 	}
 }
 
