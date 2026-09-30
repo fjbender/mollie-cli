@@ -6,13 +6,38 @@ A command-line interface for the [Mollie](https://www.mollie.com/) payment platf
 
 ## Installation
 
-You'll need a somewhat current instance of `go`. Download or clone the repository, then build and put the binary somewhere in your `$PATH`, e.g.:
+No Go toolchain is needed for the first two options, and none of them needs admin rights.
+
+### Homebrew (macOS and Linux)
+
+```bash
+brew install fjbender/tap/mollie
+```
+
+### Download a release binary
+
+1. Download the archive for your system from the [releases page](https://github.com/fjbender/mollie-cli/releases) (`mollie-cli_<os>_<arch>.tar.gz`, or `.zip` for Windows).
+2. Check it against `checksums.txt` from the same release, e.g. `shasum -a 256 -c checksums.txt --ignore-missing`.
+3. Unpack it and move `mollie` to a folder in your `$PATH`, e.g. `~/.local/bin`.
+
+On macOS, a browser download is quarantined because the binary is not signed. Remove the flag once: `xattr -d com.apple.quarantine ~/.local/bin/mollie`. Homebrew installs do not need this.
+
+### With Go
+
+```bash
+go install github.com/fjbender/mollie-cli@latest
+mv "$(go env GOPATH)/bin/mollie-cli" "$(go env GOPATH)/bin/mollie"
+```
+
+### Build from source
 
 ```bash
 git clone https://github.com/fjbender/mollie-cli && cd mollie-cli && go build -o ~/bin/mollie
 ```
 
 (Assuming the `~/bin` directory is in your `$PATH`)
+
+Check the install with `mollie --version`.
 
 ## Claude Code integration
 
@@ -562,3 +587,7 @@ go test ./...
 go vet ./...
 golangci-lint run
 ```
+
+## License
+
+Licensed under the [GNU General Public License v3.0](LICENSE).

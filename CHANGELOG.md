@@ -4,6 +4,17 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+- GPL v3 `LICENSE`
+- `mollie --version`, showing version, commit and build date
+- Homebrew formula published to `fjbender/homebrew-tap` on each release (`brew install fjbender/tap/mollie`)
+- CI job that snapshot-builds the release to catch GoReleaser config errors on pull requests
+
+### Changed
+- README installation section now covers Homebrew, release binaries, `go install` and building from source
+
 ## [v0.8.0] — 2026-09-21
 
 ### Added
