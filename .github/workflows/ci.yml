@@ -41,3 +41,25 @@ jobs:
         uses: golangci/golangci-lint-action@v7
         with:
           version: v2.9.0
+
+  release-check:
+    name: Release config check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Check and snapshot-build with GoReleaser
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: release --snapshot --clean --skip=publish
+        env:
+          HOMEBREW_TAP_GITHUB_TOKEN: dummy

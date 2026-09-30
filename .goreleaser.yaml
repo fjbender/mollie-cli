@@ -47,6 +47,25 @@ changelog:
       - "^test:"
       - "^chore:"
 
+brews:
+  - name: mollie
+    repository:
+      owner: fjbender
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    directory: Formula
+    homepage: https://github.com/fjbender/mollie-cli
+    license: GPL-3.0-only
+    description: Unofficial command-line interface for the Mollie payment platform
+    commit_author:
+      name: goreleaserbot
+      email: bot@goreleaser.com
+    caveats: |
+      The optional `webhook-tunnel` command needs cloudflared:
+        brew install cloudflared
+    test: |
+      system "#{bin}/mollie", "--version"
+
 release:
   github:
     owner: fjbender
